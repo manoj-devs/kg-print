@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Print job — KG Print</title>
+  <meta name="robots" content="noindex">
+  <meta name="theme-color" content="#17171a">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="owner.css">
+  <style>
+    .job-head { display: flex; gap: 14px; align-items: center; }
+    .job-head .otoken { width: 110px; padding: 12px 6px; }
+    .job-head .otoken b { font-size: 30px; }
+    .job-file { display: grid; grid-template-columns: auto 1fr; gap: 10px 12px; align-items: center; padding: 12px 0; border-bottom: 1px dashed var(--line); }
+    .job-file:last-child { border-bottom: 0; }
+    .job-file .ficon { width: 44px; height: 44px; }
+    .job-file .name { font-weight: 700; word-break: break-word; }
+    .print-spec { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+    .spec { font-size: 13px; font-weight: 700; padding: 3px 9px; border-radius: 6px; background: #f1efe8; }
+    .spec.color { background: #ffe1f0; color: #9b1458; }
+    .spec.dbl { background: var(--primary-soft); color: var(--primary); }
+    .job-file .btns { grid-column: 1 / -1; display: flex; gap: 8px; flex-wrap: wrap; }
+    .dl-state { font-size: 12px; color: var(--muted); }
+    .dl-state.ok { color: var(--ok); font-weight: 700; }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><img src="icon.svg" alt=""><div><b>Print job</b><small id="shopName">KG Print</small></div></div>
+    <button class="btn small" onclick="window.close()">Close</button>
+  </header>
+
+  <main>
+    <div id="msg" class="card empty">Loading…</div>
+
+    <section id="job" hidden>
+      <div class="card">
+        <div class="job-head">
+          <div class="otoken"><b id="jToken"></b><small id="jDay"></small></div>
+          <div class="grow">
+            <h2 id="jName"></h2>
+            <div class="muted">Flat <b id="jFlat"></b> · <a id="jPhone"></a></div>
+            <div style="margin-top:4px"><span class="badge" id="jStatus"></span> <b id="jTotal"></b></div>
+          </div>
+        </div>
+        <div class="note" id="jNotes" hidden></div>
+      </div>
+
+      <div class="card">
+        <div class="row" style="justify-content:space-between;margin-bottom:6px">
+          <h2>Files (<span id="jCount"></span>)</h2>
+          <div class="row">
+            <button class="btn small primary" id="dlAll">⬇ Download all</button>
+            <button class="btn small" id="dlZip">🗜 Download as ZIP</button>
+          </div>
+        </div>
+        <p class="hint" id="dlHint" style="margin:0 0 6px">If the browser asks <b>"Download multiple files?"</b>, tap <b>Allow</b>.</p>
+        <div id="jFiles"></div>
+      </div>
+
+      <button class="btn primary big block" id="markReady">🖨 All printed — mark ready</button>
+      <p class="hint" style="text-align:center;margin-top:8px">The student gets a sound + notification that their prints are ready.</p>
+    </section>
+  </main>
+
+  <div id="toasts"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <script src="config.js"></script>
+  <script src="common.js"></script>
+  <script src="job.js"></script>
+</body>
+</html>

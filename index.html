@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>KG Print — Skip the xerox queue</title>
+  <meta name="description" content="Upload your print/xerox, pay by UPI, get a token. Collect when it's ready.">
+  <meta name="theme-color" content="#17171a">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <img src="icon.svg" alt="">
+      <div><b id="shopName">KG Print &amp; Xerox</b><small>KG Apartment · order online, skip the queue</small></div>
+    </div>
+    <div id="userBox"></div>
+  </header>
+
+  <main>
+    <div id="setupNeeded" hidden></div>
+    <div id="blockedBanner" class="banner bad" hidden><b>Your account is blocked</b> because of fake payments. Please talk to the shop owner to unblock it.</div>
+    <div id="closedBanner" class="banner warn" hidden><b>Shop is closed right now.</b> You can't place new orders until the owner opens it.</div>
+    <div id="notice" class="banner" hidden></div>
+
+    <!-- ============ SIGNED OUT ============ -->
+    <section id="signedOut" hidden>
+      <div class="hero">
+        <div class="ticket-demo"><small>your token</small><b>KG-7</b></div>
+        <h1>Skip the xerox queue.</h1>
+        <p class="lede">Upload your PDF, Word file or photos, pay by UPI, and get a token. Collect your prints when it says <b>Ready</b>.</p>
+      </div>
+      <ol class="steps">
+        <li><span class="step-no">1</span><div><b>Upload</b><small>PDF, Word (.docx / .doc) or photos. Pick colour, sides and copies.</small></div></li>
+        <li><span class="step-no">2</span><div><b>Pay by UPI</b><small>GPay, PhonePe, Paytm — then enter the 12-digit UTR and screenshot.</small></div></li>
+        <li><span class="step-no">3</span><div><b>Get your token</b><small>Show your KG token at the shop when the status says Ready.</small></div></li>
+      </ol>
+      <button id="googleBtn" class="btn gbtn block">
+        <svg viewBox="0 0 48 48" aria-hidden="true"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.4-.4-3.5z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-8l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.4-.4-3.5z"/></svg>
+        Continue with Google
+      </button>
+      <p class="hint" style="text-align:center;margin-top:10px">We only use your name and email to show your orders.</p>
+    </section>
+
+    <!-- ============ SIGNED IN ============ -->
+    <section id="signedIn" hidden>
+      <nav class="tabs" role="tablist">
+        <button data-tab="new" class="active">New order</button>
+        <button data-tab="orders">My orders <span class="pill" id="activeCount"></span></button>
+      </nav>
+
+      <div id="tab-new">
+        <form id="orderForm" novalidate>
+          <div class="card">
+            <div class="card-head"><span class="step-no">1</span><h2>Your details</h2></div>
+            <label class="field"><span>Name</span><input type="text" id="fName" maxlength="80" autocomplete="name" required></label>
+            <div class="grid2">
+              <label class="field"><span>Phone (WhatsApp)</span><input type="tel" id="fPhone" inputmode="numeric" placeholder="10-digit number" autocomplete="tel-national" required></label>
+              <label class="field"><span>Flat / Room no.</span><input type="text" id="fFlat" maxlength="40" placeholder="e.g. B-204" required></label>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-head"><span class="step-no">2</span><div><h2>Files to print</h2><small>PDF, Word (.docx/.doc), JPG, PNG · up to 25 MB each · max 20 files</small></div></div>
+            <label class="dropzone" id="dropzone">
+              <input type="file" id="fileInput" multiple accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.webp,application/pdf,image/*,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document">
+              <b>📄 Tap to choose files</b>
+              <small>or drag &amp; drop them here</small>
+            </label>
+            <div class="filelist" id="fileList"></div>
+            <p class="hint" id="wordHint" hidden>⚠ Word page counts are estimates — please check the page number. Wrong counts may delay your order.</p>
+          </div>
+
+          <div class="card" id="payCard" hidden>
+            <div class="card-head"><span class="step-no">3</span><h2>Pay by UPI</h2></div>
+            <div class="total-row"><span>Total to pay</span><span class="amt" id="totalAmt">₹0</span></div>
+            <p class="paise-note" id="paiseNote"></p>
+            <div class="pay-grid">
+              <div>
+                <a id="upiBtn" class="btn primary big block" href="#">Pay <span id="upiBtnAmt"></span> with UPI app</a>
+                <p class="hint" style="margin:8px 0 12px">Opens GPay / PhonePe / Paytm with the amount filled in. On a laptop, scan the QR with your phone.</p>
+                <div class="upi-id"><span class="grow" id="upiIdText"></span><button type="button" class="btn small" id="copyUpi">Copy</button></div>
+                <p class="hint" style="margin-top:6px">If the button doesn't work, pay <b id="manualAmt"></b> to this UPI ID manually.</p>
+              </div>
+              <div class="qrbox">
+                <div id="qr"></div>
+                <button type="button" class="btn small ghost" id="saveQr">⬇ Save QR</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="card" id="confirmCard" hidden>
+            <div class="card-head"><span class="step-no">4</span><h2>Confirm your payment</h2></div>
+            <label class="field"><span>UTR / UPI Ref. No. (12 digits)</span>
+              <input type="text" id="fUtr" inputmode="numeric" placeholder="e.g. 431298765432" autocomplete="off" required>
+              <div class="hint">Find it in your UPI app → payment details → "UPI Ref No." / "UTR". Not the Google transaction ID.</div>
+            </label>
+            <label class="field"><span>Payment screenshot</span>
+              <input type="file" id="fShot" accept="image/*" required>
+              <div class="hint">Take the screenshot on the payment <b>details</b> page, so the <b>amount</b> and <b>UTR / UPI Ref No.</b> are both visible.</div>
+              <img id="shotPreview" class="shot-preview" alt="" hidden>
+            </label>
+            <div id="shotStatus" class="shot-status" hidden></div>
+            <label id="overrideBox" class="override" hidden>
+              <input type="checkbox" id="fOverride">
+              <span>My UTR is correct, the screenshot is just hard to read. Send it to the owner to check manually. <b>Fake payments block your account.</b></span>
+            </label>
+            <label class="field"><span>Notes for the shop (optional)</span>
+              <textarea id="fNotes" maxlength="500" placeholder="e.g. print only pages 1–5, staple it, spiral binding…"></textarea>
+            </label>
+            <button type="submit" class="btn dark big block" id="submitBtn">Submit order &amp; get token</button>
+            <p class="hint" style="text-align:center;margin-top:8px">The shop owner checks every payment. Fake or reused payments are rejected.</p>
+          </div>
+        </form>
+      </div>
+
+      <div id="tab-orders" hidden>
+        <div class="orders" id="ordersList"><div class="empty">Loading…</div></div>
+      </div>
+    </section>
+  </main>
+
+  <!-- success popup -->
+  <div class="modal" id="successModal" hidden>
+    <div class="modal-box">
+      <h2>Order placed! 🎉</h2>
+      <p class="muted">Your token for today</p>
+      <div class="big-token" id="successToken">KG-1</div>
+      <p id="successInfo" class="muted"></p>
+      <p>We'll check your payment and update the status in <b>My orders</b>. Collect your prints when it says <b>Ready</b>.</p>
+      <button class="btn primary block" id="notifyBtn">🔔 Notify me when ready</button>
+      <button class="btn block" style="margin-top:8px" id="successClose">View my orders</button>
+    </div>
+  </div>
+
+  <div id="toasts"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <script src="config.js"></script>
+  <script src="common.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

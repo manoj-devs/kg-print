@@ -1,0 +1,9 @@
+{
+  "name": "KG Print & Xerox",
+  "short_name": "KG Print",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#f5f2ea",
+  "theme_color": "#17171a",
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}
