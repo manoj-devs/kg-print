@@ -82,13 +82,26 @@
             <p class="paise-note" id="paiseNote"></p>
             <div class="pay-grid">
               <div>
-                <a id="upiBtn" class="btn primary big block" href="#">Pay <span id="upiBtnAmt"></span> with UPI app</a>
-                <p class="hint" style="margin:8px 0 12px">Opens GPay / PhonePe / Paytm with the amount filled in. On a laptop, scan the QR with your phone.</p>
-                <div class="upi-id"><span class="grow" id="upiIdText"></span><button type="button" class="btn small" id="copyUpi">Copy</button></div>
-                <p class="hint" style="margin-top:6px">If the button doesn't work, pay <b id="manualAmt"></b> to this UPI ID manually.</p>
+                <h3 class="pay-opt">Option A · Pay manually <span class="badge st-ready" style="font-size:11px">works always</span></h3>
+                <ol class="manual-steps">
+                  <li>Copy the UPI ID
+                    <div class="upi-id"><span class="grow" id="upiIdText"></span><button type="button" class="btn small" id="copyUpi">Copy</button></div>
+                  </li>
+                  <li>Copy the exact amount
+                    <div class="upi-id"><span class="grow"><b id="manualAmt"></b></span><button type="button" class="btn small" id="copyAmt">Copy</button></div>
+                  </li>
+                  <li>Open GPay / PhonePe / Paytm → <b>Pay UPI ID</b> (or "To UPI ID") → paste both → pay.</li>
+                  <li>Come back here — we'll take you to the last step.</li>
+                </ol>
+
+                <h3 class="pay-opt">Option B · Open UPI app directly</h3>
+                <a id="upiBtn" class="btn primary block" href="#">Pay <span id="upiBtnAmt"></span> with UPI app</a>
+                <p class="hint" style="margin:6px 0 0">Some apps block this with <i>"failed as per UPI risk policy"</i> — no money is taken. If that happens, use Option A.</p>
               </div>
               <div class="qrbox">
+                <h3 class="pay-opt" style="text-align:center">Option C · Scan QR</h3>
                 <div id="qr"></div>
+                <p class="hint" style="margin:6px 0 0;text-align:center">On a laptop: scan with your phone's UPI app.</p>
                 <button type="button" class="btn small ghost" id="saveQr">⬇ Save QR</button>
               </div>
             </div>
@@ -96,6 +109,7 @@
 
           <div class="card" id="confirmCard" hidden>
             <div class="card-head"><span class="step-no">4</span><h2>Confirm your payment</h2></div>
+            <div class="banner welcome-back" id="backBanner" hidden>👋 <b>Welcome back!</b> If your payment was successful, take a screenshot of the payment details, then enter the UTR and upload it below.</div>
             <label class="field"><span>UTR / UPI Ref. No. (12 digits)</span>
               <input type="text" id="fUtr" inputmode="numeric" placeholder="e.g. 431298765432" autocomplete="off" required>
               <div class="hint">Find it in your UPI app → payment details → "UPI Ref No." / "UTR". Not the Google transaction ID.</div>

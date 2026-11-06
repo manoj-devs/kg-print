@@ -149,8 +149,21 @@ function wireStaticEvents() {
   $("#copyUpi").onclick = async () => {
     try { await navigator.clipboard.writeText(settings.upi_id); toast("UPI ID copied", "ok", 2000); }
     catch (e) { toast(settings.upi_id); }
+    startPaying();
   };
   $("#saveQr").onclick = saveQr;
+  $("#copyAmt").onclick = async () => {
+    const v = orderTotal().toFixed(2);
+    try { await navigator.clipboard.writeText(v); toast(`Amount ${v} copied`, "ok", 2000); } catch (e) { toast(v); }
+    startPaying();
+  };
+  $("#upiBtn").addEventListener("click", startPaying);
+  $("#saveQr").addEventListener("click", startPaying);
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) { if (payingSince) leftForPayment = true; return; }
+    if (leftForPayment) welcomeBack();
+  });
+  window.addEventListener("focus", () => { if (leftForPayment) welcomeBack(); });
   $("#orderForm").onsubmit = submitOrder;
 
   $("#successClose").onclick = () => { $("#successModal").hidden = true; showTab("orders"); };
@@ -340,6 +353,21 @@ function saveQr() {
   a.download = `kg-print-pay-${orderTotal()}.png`;
   a.click();
   toast("QR saved. Open your UPI app → Scan → pick from gallery.", "ok", 5000);
+}
+
+// ---------------- leaving to pay → coming back ----------------
+let payingSince = 0;        // when the student started paying (tapped pay / copied)
+let leftForPayment = false; // the page went to the background after that
+function startPaying() { payingSince = Date.now(); leftForPayment = false; }
+function welcomeBack() {
+  leftForPayment = false;
+  if (!payingSince || Date.now() - payingSince > 30 * 60000) return; // only within 30 min
+  if ($("#confirmCard").hidden) return;
+  $("#backBanner").hidden = false;
+  const card = $("#confirmCard");
+  card.scrollIntoView({ behavior: "smooth", block: "start" });
+  card.classList.remove("glow"); void card.offsetWidth; card.classList.add("glow");
+  setTimeout(() => { if (!$("#fUtr").value) $("#fUtr").focus({ preventScroll: true }); }, 700);
 }
 
 // ---------------- screenshot check ----------------
@@ -541,6 +569,8 @@ function friendlyError(err) {
 
 function onOrderPlaced(order) {
   resetPaise();
+  payingSince = 0; leftForPayment = false;
+  $("#backBanner").hidden = true;
   shotOcr = null;
   ocrFails = 0;
   $("#overrideBox").hidden = true;

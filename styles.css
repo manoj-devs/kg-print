@@ -210,3 +210,10 @@ textarea { min-height: 70px; resize: vertical; }
 
 .setup-box { background: #fff; border: 2px solid var(--bad); border-radius: 14px; padding: 18px; }
 code { background: #f1efe8; padding: 1px 5px; border-radius: 5px; font-size: 13px; }
+
+.pay-opt { font-size: 14px; margin: 4px 0 8px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.manual-steps { margin: 0 0 16px; padding-left: 20px; display: grid; gap: 8px; font-size: 14px; }
+.manual-steps .upi-id { margin-top: 4px; }
+.welcome-back { background: var(--ok-soft); border-color: #bfe3c9; color: #0d4d26; }
+.card.glow { animation: glow 1.4s ease 2; }
+@keyframes glow { 50% { box-shadow: 0 0 0 4px var(--primary-soft), var(--shadow); border-color: var(--primary); } }
