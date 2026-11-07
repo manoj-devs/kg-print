@@ -224,3 +224,8 @@ code { background: #f1efe8; padding: 1px 5px; border-radius: 5px; font-size: 13p
 .other-ways { margin-top: 4px; font-size: 14px; }
 .other-ways summary { cursor: pointer; color: var(--muted); font-weight: 600; padding: 6px 0; }
 .qrbox #qr { background: #fff; padding: 10px; width: fit-content; margin: 0 auto; }
+
+.pay-step { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.pay-step .btn { flex: 1; }
+.step-mini { flex: none; width: 24px; height: 24px; border-radius: 50%; background: var(--ink); color: #fff; font-size: 12px; font-weight: 700; display: grid; place-items: center; }
+.qr-saved { color: var(--ok) !important; font-weight: 600; }

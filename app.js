@@ -157,7 +157,14 @@ function wireStaticEvents() {
     catch (e) { toast(settings.upi_id); }
     startPaying();
   };
-  $("#saveQr").onclick = () => { saveQr(); toast("QR saved. Open your UPI app → Scan → gallery → pick it.", "ok", 6000); };
+  const onSave = () => {
+    saveQr();
+    qrSaved = true;
+    $("#qrSavedNote").innerHTML = "✓ QR saved to your phone. Now open your UPI app (step 2).";
+    $("#qrSavedNote").classList.add("qr-saved");
+  };
+  $("#saveQr").onclick = onSave;
+  $("#saveQrBig").onclick = onSave;
   $$(".app-btn").forEach((btn) => (btn.onclick = () => openUpiApp(btn.dataset.app)));
   $("#copyAmt").onclick = async () => {
     const v = orderTotal().toFixed(2);
@@ -393,27 +400,28 @@ function saveQr() {
   startPaying();
 }
 
-// Open just the app (its home screen) — the payment itself happens by scanning
-// the saved QR, which UPI allows even for small-merchant accounts.
+// Open just the UPI app (its normal home screen) — nothing else.
+// The payment itself happens by scanning the saved QR, which UPI allows.
 const UPI_APPS = {
-  gpay: { name: "GPay", pkg: "com.google.android.apps.nbu.paisa.user", scheme: "tez", ios: "gpay://" },
-  phonepe: { name: "PhonePe", pkg: "com.phonepe.app", scheme: "phonepe", ios: "phonepe://" },
-  paytm: { name: "Paytm", pkg: "net.one97.paytm", scheme: "paytmmp", ios: "paytmmp://" },
+  gpay: { name: "GPay", pkg: "com.google.android.apps.nbu.paisa.user", ios: "gpay://" },
+  phonepe: { name: "PhonePe", pkg: "com.phonepe.app", ios: "phonepe://" },
+  paytm: { name: "Paytm", pkg: "net.one97.paytm", ios: "paytmmp://" },
 };
+let qrSaved = false;
 function openUpiApp(key) {
   const app = UPI_APPS[key];
-  saveQr();
-  toast(`QR saved ✓ In ${app.name}: tap Scan → gallery → pick the QR`, "ok", 9000);
+  startPaying();
+  if (!qrSaved) toast("Tip: save the payment QR first (step 1), so you can pick it from the gallery.", "warn", 6000);
   const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
   const isAndroid = /Android/i.test(navigator.userAgent);
   if (!isIOS && !isAndroid) { toast("On a laptop, scan the QR on screen with your phone.", "warn", 6000); return; }
-  const url = isIOS ? app.ios : `intent://#Intent;scheme=${app.scheme};package=${app.pkg};end`;
-  // give the download a moment to start before leaving the page
-  setTimeout(() => { location.href = url; }, 700);
-  // if the app didn't open (not installed / blocked), say what to do
+  location.href = isIOS
+    ? app.ios
+    : `intent:#Intent;action=android.intent.action.MAIN;category=android.intent.category.LAUNCHER;package=${app.pkg};end`;
+  // if the app didn't open (not installed / browser blocked it), say what to do
   setTimeout(() => {
-    if (!document.hidden) toast(`Couldn't open ${app.name}. Open any UPI app yourself → Scan → gallery → pick the saved QR.`, "warn", 9000);
-  }, 3500);
+    if (!document.hidden) toast(`Couldn't open ${app.name} from here. Open it yourself → Scan → gallery → pick the saved QR.`, "warn", 9000);
+  }, 2500);
 }
 
 // ---------------- leaving to pay → coming back ----------------
@@ -632,6 +640,9 @@ function friendlyError(err) {
 function onOrderPlaced(order) {
   resetPaise();
   payingSince = 0; leftForPayment = false;
+  qrSaved = false;
+  $("#qrSavedNote").innerHTML = 'If your browser asks "Download?", tap <b>Download</b>.';
+  $("#qrSavedNote").classList.remove("qr-saved");
   $("#backBanner").hidden = true;
   shotOcr = null;
   ocrFails = 0;
