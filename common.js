@@ -155,10 +155,10 @@
   let ocrWorkerPromise = null;
   // Enlarge + greyscale the screenshot first so small text (like Paytm's tiny
   // paise "₹2.58") is read reliably.
-  async function prepForOcr(source) {
+  async function prepForOcr(source, maxWidth = 1400) {
     try {
       const bmp = await createImageBitmap(source);
-      const scale = Math.min(3, Math.max(1, 1400 / bmp.width));
+      const scale = Math.min(maxWidth / bmp.width, Math.max(1, maxWidth / bmp.width), 3);
       const c = document.createElement("canvas");
       c.width = Math.round(bmp.width * scale);
       c.height = Math.round(bmp.height * scale);
@@ -187,15 +187,42 @@
     return digitWorkerPromise;
   }
 
+  // Load the reader in the background ahead of time (called when the student
+  // adds files), so the screenshot check is quick when they get to it.
+  let warmed = false;
+  function warmOcr() {
+    if (warmed) return;
+    warmed = true;
+    const go = async () => {
+      try {
+        if (!window.Tesseract) await loadScript(TESSERACT_URL);
+        if (!ocrWorkerPromise) ocrWorkerPromise = Tesseract.createWorker("eng");
+        await ocrWorkerPromise;
+        await digitWorker();
+      } catch (e) { warmed = false; ocrWorkerPromise = null; }
+    };
+    (window.requestIdleCallback || ((f) => setTimeout(f, 1500)))(go);
+  }
+
   // Returns { text, lines:[{text, h}], mainDigits }
   //   h = height of each text line (the payment amount is the biggest)
   //   mainDigits = digits-only re-read of that biggest amount line
   async function ocrImage(source) {
     if (!window.Tesseract) await loadScript(TESSERACT_URL);
     if (!ocrWorkerPromise) ocrWorkerPromise = Tesseract.createWorker("eng");
-    const worker = await ocrWorkerPromise;
-    const img = source instanceof Blob ? await prepForOcr(source) : source;
-    const { data } = await worker.recognize(img);
+    let worker;
+    try { worker = await ocrWorkerPromise; }
+    catch (e) { ocrWorkerPromise = null; throw e; } // allow a fresh try next time
+    let img = source instanceof Blob ? await prepForOcr(source) : source;
+    let data;
+    try {
+      ({ data } = await worker.recognize(img));
+    } catch (e) {
+      // low-memory phones: retry on a smaller copy
+      if (!(source instanceof Blob)) throw e;
+      img = await prepForOcr(source, 900);
+      ({ data } = await worker.recognize(img));
+    }
     const lines = (data.lines || []).map((l) => ({ text: (l.text || "").trim(), h: l.bbox ? l.bbox.y1 - l.bbox.y0 : 0, bbox: l.bbox }));
     let mainDigits = null;
     try {
@@ -462,10 +489,13 @@
     if (r.software) hard.push({ code: "edited", fake: true, msg: `This image was saved by an editing app (${r.software}). Upload the original screenshot from your UPI app.` });
     if (r.demo) hard.push({ code: "demo", fake: true, msg: `The screenshot says "${r.demo.toUpperCase()}" — that's not a real payment.` });
     if (r.failed && !r.success) hard.push({ code: "failed", fake: false, msg: "The screenshot shows the payment as failed or pending. Wait until it says successful." });
-    if (!r.amount && r.wrongAmounts.length) hard.push({ code: "amount", fake: false, msg: `The screenshot shows ${rupeesExact(r.wrongAmounts[0])}, but this order needs exactly ${amt}.` });
-    if (r.dateOld) hard.push({ code: "date", fake: false, msg: `The screenshot is from ${r.dateSeen}. Upload the screenshot of today's payment.` });
+    // On a tiny/resized image the text can't be read reliably, so only the size
+    // problem (and hidden AI/editing labels) are reported — not misread amounts/times.
+    const readable = !r.tooSmall;
+    if (readable && !r.amount && r.wrongAmounts.length) hard.push({ code: "amount", fake: false, msg: `The screenshot shows ${rupeesExact(r.wrongAmounts[0])}, but this order needs exactly ${amt}.` });
+    if (readable && r.dateOld) hard.push({ code: "date", fake: false, msg: `The screenshot is from ${r.dateSeen}. Upload the screenshot of today's payment.` });
     if (r.tooSmall) hard.push({ code: "small", fake: false, msg: `The image is too small (${r.w}×${r.h}) — it was resized or forwarded. Upload the original screenshot from your phone's gallery.` });
-    if (r.timeOk === false) hard.push({ code: "time", fake: false, msg: `The time in the screenshot (${r.timeSeen.join(", ")}) doesn't match this order. Take a fresh screenshot right after paying.` });
+    if (readable && r.timeOk === false) hard.push({ code: "time", fake: false, msg: `The time in the screenshot (${r.timeSeen.join(", ")}) doesn't match this order. Take a fresh screenshot right after paying.` });
     const soft = [];
     if (!r.utr) soft.push("utr");
     if (r.payee === false) soft.push("payee");
@@ -477,6 +507,6 @@
     payeeSeen, timeCheck, otherAmounts, inspectImage, judgeScreenshot, mainAmount, amountsInLine, nearlySame,
     configured, sb, $, $$, esc, rupees, rupeesExact, rateFor, linePrice, todayIST, fmtTime, fmtDay, STATUS,
     toast, unlockAudio, audioReady, chime, askNotify, notify, flashTitle, stopFlash,
-    signInWithGoogle, signOut, setupNeededHTML, loadScript, ocrImage, utrInText, amountInText,
+    signInWithGoogle, signOut, setupNeededHTML, loadScript, ocrImage, warmOcr, utrInText, amountInText,
   };
 })();

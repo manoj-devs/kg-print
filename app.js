@@ -19,6 +19,7 @@ let myOrders = [];
 let ordersChannel = null;
 let lastQrText = "";
 let blocked = false;
+let shotFile = null;     // in-memory copy of the payment screenshot
 let shotOcr = null;      // { file, promise, text, error }
 let ocrFails = 0;        // how many times the UTR wasn't found in the screenshot
 
@@ -135,13 +136,18 @@ function wireStaticEvents() {
     e.target.value = e.target.value.replace(/\D/g, "").slice(0, 12);
     showShotStatus();
   });
-  $("#fShot").onchange = (e) => {
-    const f = e.target.files[0];
+  $("#fShot").onchange = async (e) => {
+    const picked = e.target.files[0];
     const img = $("#shotPreview");
     ocrFails = 0;
     $("#overrideBox").hidden = true;
     $("#fOverride").checked = false;
-    if (!f) { img.hidden = true; shotOcr = null; showShotStatus(); return; }
+    shotFile = null;
+    if (!picked) { img.hidden = true; shotOcr = null; showShotStatus(); return; }
+    let f;
+    try { f = await keepInMemory(picked); }
+    catch (err) { e.target.value = ""; img.hidden = true; shotOcr = null; showShotStatus(); return toast("Couldn't read that screenshot. Please select it again.", "error", 6000); }
+    shotFile = f;
     img.src = URL.createObjectURL(f);
     img.hidden = false;
     startShotOcr(f);
@@ -190,6 +196,7 @@ function kindOf(name) {
 }
 
 function addFiles(fileList) {
+  KG.warmOcr(); // start loading the screenshot reader now
   for (const file of Array.from(fileList || [])) {
     if (items.length >= MAX_FILES) { toast(`Max ${MAX_FILES} files per order`, "warn"); break; }
     const kind = kindOf(file.name);
@@ -200,12 +207,25 @@ function addFiles(fileList) {
       id: crypto.randomUUID(), file, name: file.name, kind,
       pages: 1, pagesSource: kind === "image" ? "auto" : "manual",
       copies: 1, color: kind === "image", double: false,
-      loading: kind === "pdf" || kind === "docx",
+      loading: true,
     };
     items.push(it);
-    if (it.loading) countPages(it).finally(() => { it.loading = false; renderItems(); });
+    // Copy the file into memory NOW. On phones, the browser loses access to picked
+    // files after you switch apps (e.g. to Paytm to pay), so we never read it again later.
+    keepInMemory(file)
+      .then((copy) => { it.file = copy; return it.kind === "pdf" || it.kind === "docx" ? countPages(it) : null; })
+      .catch(() => {
+        items = items.filter((x) => x !== it);
+        toast(`Couldn't read ${file.name}. Please select it again.`, "error", 6000);
+      })
+      .finally(() => { it.loading = false; renderItems(); });
   }
   renderItems();
+}
+
+async function keepInMemory(file) {
+  const buf = await file.arrayBuffer();
+  return new File([buf], file.name, { type: file.type, lastModified: file.lastModified });
 }
 
 async function countPages(it) {
@@ -454,7 +474,7 @@ async function submitOrder(e) {
   const phone = $("#fPhone").value.trim();
   const flat = $("#fFlat").value.trim();
   const utr = $("#fUtr").value.trim();
-  const shot = $("#fShot").files[0];
+  const shot = shotFile;
   const notes = $("#fNotes").value.trim();
 
   if (name.length < 2) return fail("Enter your name", "#fName");
@@ -485,7 +505,7 @@ async function submitOrder(e) {
       return fail("This screenshot can't be accepted: " + r.hard[0].msg, "#fShot");
     }
     if (r.state === "unavailable") {
-      studentCheck = { unavailable: true };
+      studentCheck = { unavailable: true, why: String((shotOcr.error && (shotOcr.error.message || shotOcr.error)) || "").slice(0, 120) };
     } else {
       // things we couldn't confirm — retry first, manual check allowed after 2 tries
       const missing = [];
@@ -556,6 +576,7 @@ async function submitOrder(e) {
 
 function friendlyError(err) {
   const msg = (err && (err.message || err.error_description)) || String(err);
+  if (/could not be read|NotReadable|permission problems/i.test(msg)) return "Your phone lost access to a file. Please remove the files, select them again, and submit.";
   if (/orders_utr_unique/.test(msg)) return "This UTR was already used for another order.";
   if (/orders_shot_unique/.test(msg)) return "This screenshot was already uploaded before.";
   if (/blocked/i.test(msg)) { blocked = true; $("#blockedBanner").hidden = false; return "Your account is blocked because of fake payments. Please talk to the shop owner."; }
@@ -580,6 +601,7 @@ function onOrderPlaced(order) {
   renderItems();
   $("#fUtr").value = "";
   $("#fShot").value = "";
+  shotFile = null;
   $("#shotPreview").hidden = true;
   $("#fNotes").value = "";
   $("#successToken").textContent = order.token;
