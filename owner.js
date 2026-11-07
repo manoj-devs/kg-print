@@ -219,11 +219,26 @@ function openDocWindows(o) {
     return w;
   });
 }
-function loadDocWindows(o, wins) {
+// Direct links to the files: PDFs and photos open in the browser's own viewer
+// (instant), Word files download straight away.
+async function directUrls(o) {
+  const out = [];
+  for (let i = 0; i < o.files.length; i++) {
+    const f = o.files[i];
+    const word = f.kind === "doc" || f.kind === "docx";
+    const name = `${o.token}_${i + 1}_${f.name}`.replace(/[\\/:*?"<>|]+/g, "_");
+    out.push(await signedUrl("prints", f.path, word ? name : undefined));
+  }
+  return out;
+}
+async function loadDocWindows(o, wins) {
+  let urls;
+  try { urls = await directUrls(o); }
+  catch (err) { wins.forEach((w) => w && w.close()); return toast("Couldn't open files: " + err.message, "error"); }
   let blocked = 0;
-  wins.forEach((w, i) => { if (w) w.location = viewUrl(o, i); else blocked++; });
+  wins.forEach((w, i) => { if (w) w.location = urls[i]; else blocked++; });
   if (blocked) {
-    toast(`${blocked} of ${o.files.length} document window(s) were blocked. Allow pop-ups for this site (address bar → 🚫 icon → Always allow), then tap 📂 Open all.`, "warn", 10000);
+    toast(`${blocked} of ${o.files.length} tab(s) were blocked. Allow pop-ups for this site (address bar → 🚫 icon → Always allow), then tap 📂 Open all docs.`, "warn", 10000);
   }
 }
 function openAllDocs(o) {
@@ -367,7 +382,7 @@ function cardHTML(o) {
   }).join("");
 
   const actions = {
-    payment_review: `<button class="btn ok" data-act="verify">✓ Payment received</button><button class="btn bad" data-act="reject">✕ Reject</button>`,
+    payment_review: `${o.files.length > 1 && !o.files_deleted ? `<button class="btn" data-act="job">📂 Open all ${o.files.length} docs</button>` : ""}<button class="btn ok" data-act="verify">✓ Payment received</button><button class="btn bad" data-act="reject">✕ Reject</button>`,
     queued: `${o.files.length > 1 && !o.files_deleted ? `<button class="btn" data-act="job">📂 Open all ${o.files.length} docs</button>` : ""}<button class="btn primary" data-act="ready">🖨 Printed — mark ready</button><button class="btn small ghost" data-act="back">↺</button>`,
     ready: `<button class="btn dark" data-act="collected">✓ Collected</button>${o.files.length > 1 && !o.files_deleted ? `<button class="btn small" data-act="job" title="Open all documents">📂</button>` : ""}<a class="btn small" href="${waLink(o)}" target="_blank" rel="noopener">WhatsApp</a><button class="btn small ghost" data-act="back">↺</button>`,
     collected: `<button class="btn small ghost" data-act="back">↺ Move back</button>`,
@@ -518,9 +533,13 @@ async function onGridClick(e) {
     return;
   }
   if (act === "open") {
-    const i = +btn.dataset.i;
-    const w = window.open(viewUrl(o, i), `kgdoc-${o.id}-${i}`);
-    if (!w) location.href = viewUrl(o, i);
+    const i = +btn.dataset.i, f = o.files[i];
+    const w = window.open("", `kgdoc-${o.id}-${i}`); // open first, inside the tap
+    try {
+      const word = f.kind === "doc" || f.kind === "docx";
+      const url = await signedUrl("prints", f.path, word ? `${o.token}_${i + 1}_${f.name}` : undefined);
+      if (w) w.location = url; else location.href = url;
+    } catch (err) { if (w) w.close(); toast("Couldn't open file: " + err.message, "error"); }
     return;
   }
   if (act === "shot") {
