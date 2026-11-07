@@ -195,23 +195,37 @@ async function confirmVerify() {
   const o = verifying;
   if (!o) return;
   $("#verifyModal").hidden = true;
-  // open an empty window FIRST (inside the tap, so the browser doesn't block it),
-  // save the new status, then load the print job into that window
-  const wantJob = $("#verOpenJob").checked && !o.files_deleted;
-  const w = wantJob ? window.open("", "kgjob-" + o.id) : null;
-  if (w) w.document.write("<p style='font:16px system-ui;padding:24px'>Opening print job…</p>");
-  const saved = await setStatus(o, { status: "queued" }, `${o.token} paid — moved to print queue`);
-  if (!wantJob) return;
-  if (!w) { toast("Your browser blocked the new window. Allow pop-ups for this site, or tap 📂 Print job.", "warn", 8000); return; }
-  if (!saved) { w.close(); return; }
-  w.location = jobUrl(o, true);
+  // Open one window per document FIRST (inside the tap, so the browser allows it),
+  // save "accepted", then load each document into its window.
+  const wantDocs = $("#verOpenJob").checked && !o.files_deleted;
+  const wins = wantDocs ? openDocWindows(o) : [];
+  const saved = await setStatus(o, { status: "queued" }, `${o.token} accepted — student notified`);
+  if (!wantDocs) return;
+  if (!saved) { wins.forEach((w) => w && w.close()); return; }
+  loadDocWindows(o, wins);
 }
-function jobUrl(o, autoDownload) {
-  return new URL(`job.html?id=${encodeURIComponent(o.id)}${autoDownload ? "&auto=1" : ""}`, location.href).href;
+
+function viewUrl(o, i) {
+  return new URL(`view.html?id=${encodeURIComponent(o.id)}&i=${i}`, location.href).href;
 }
-function openJob(o, autoDownload) {
-  const w = window.open(jobUrl(o, autoDownload), "kgjob-" + o.id);
-  if (!w) toast("Your browser blocked the new window. Allow pop-ups for this site, or tap 📂 Print job.", "warn", 8000);
+// opens empty windows synchronously (must run inside the tap)
+function openDocWindows(o) {
+  return o.files.map((f, i) => {
+    const w = window.open("", `kgdoc-${o.id}-${i}`);
+    if (w) { try { w.document.write(`<p style="font:16px system-ui;padding:24px">Opening ${o.token} · file ${i + 1}…</p>`); } catch (e) { /* ignore */ } }
+    return w;
+  });
+}
+function loadDocWindows(o, wins) {
+  let blocked = 0;
+  wins.forEach((w, i) => { if (w) w.location = viewUrl(o, i); else blocked++; });
+  if (blocked) {
+    toast(`${blocked} of ${o.files.length} document window(s) were blocked. Allow pop-ups for this site (address bar → 🚫 icon → Always allow), then tap 📂 Open all.`, "warn", 10000);
+  }
+}
+function openAllDocs(o) {
+  if (o.files_deleted) return toast("Files of this order were already deleted.", "warn");
+  loadDocWindows(o, openDocWindows(o));
 }
 
 // ---------------- reject dialog ----------------
@@ -351,8 +365,8 @@ function cardHTML(o) {
 
   const actions = {
     payment_review: `<button class="btn ok" data-act="verify">✓ Payment received</button><button class="btn bad" data-act="reject">✕ Reject</button>`,
-    queued: `<button class="btn" data-act="job">📂 Print job</button><button class="btn primary" data-act="ready">🖨 Printed — mark ready</button><button class="btn small ghost" data-act="back">↺</button>`,
-    ready: `<button class="btn dark" data-act="collected">✓ Collected</button><button class="btn small" data-act="job">📂</button><a class="btn small" href="${waLink(o)}" target="_blank" rel="noopener">WhatsApp</a><button class="btn small ghost" data-act="back">↺</button>`,
+    queued: `<button class="btn" data-act="job">📂 Open all docs</button><button class="btn primary" data-act="ready">🖨 Printed — mark ready</button><button class="btn small ghost" data-act="back">↺</button>`,
+    ready: `<button class="btn dark" data-act="collected">✓ Collected</button><button class="btn small" data-act="job" title="Open all documents">📂</button><a class="btn small" href="${waLink(o)}" target="_blank" rel="noopener">WhatsApp</a><button class="btn small ghost" data-act="back">↺</button>`,
     collected: `<button class="btn small ghost" data-act="back">↺ Move back</button>`,
     rejected: `<button class="btn small ghost" data-act="back">↺ Move back to verify</button>`,
   }[o.status];
@@ -482,12 +496,9 @@ async function onGridClick(e) {
   const act = btn.dataset.act;
 
   if (act === "open") {
-    const f = o.files[+btn.dataset.i];
-    const win = window.open("", "_blank"); // open first so mobile popup blockers allow it
-    try {
-      const url = await signedUrl("prints", f.path, f.kind === "doc" || f.kind === "docx" ? f.name : undefined);
-      if (win) win.location = url; else location.href = url;
-    } catch (err) { if (win) win.close(); toast("Couldn't open file: " + err.message, "error"); }
+    const i = +btn.dataset.i;
+    const w = window.open(viewUrl(o, i), `kgdoc-${o.id}-${i}`);
+    if (!w) location.href = viewUrl(o, i);
     return;
   }
   if (act === "shot") {
@@ -502,7 +513,7 @@ async function onGridClick(e) {
   if (act === "recheck") { ocrQueued.delete(o.id); upsertLocal({ ...o, auto_check: null }); return; }
 
   if (act === "verify") return openVerify(o);
-  if (act === "job") return openJob(o, false);
+  if (act === "job") return openAllDocs(o);
 
   if (act === "reject") return openReject(o);
   if (act === "ready") return setStatus(o, { status: "ready" }, `${o.token} is ready — student notified`);

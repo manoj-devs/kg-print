@@ -43,7 +43,7 @@
 
   const STATUS = {
     payment_review: "Checking payment",
-    queued: "In print queue",
+    queued: "Accepted ✓ — printing",
     ready: "Ready — collect now",
     collected: "Collected",
     rejected: "Rejected",

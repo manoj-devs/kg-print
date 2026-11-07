@@ -714,7 +714,9 @@ function onStatusChange(o) {
     KG.notify(`${o.token} is ready 🖨️`, "Your prints are ready. Collect them at the shop.");
     KG.flashTitle(`✅ ${o.token} ready!`);
   } else if (o.status === "queued") {
-    toast(`${o.token}: payment confirmed, in the print queue`, "ok");
+    KG.chime(1);
+    toast(`✅ ${o.token} ACCEPTED — payment confirmed, your prints are being made`, "ok", 8000);
+    KG.notify(`${o.token} accepted ✅`, "Payment confirmed. We'll tell you when it's ready to collect.");
   } else if (o.status === "rejected") {
     KG.chime(1);
     toast(`${o.token} was rejected${o.reject_reason ? ": " + o.reject_reason : ""}`, "error", 9000);
