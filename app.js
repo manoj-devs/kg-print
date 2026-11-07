@@ -457,6 +457,9 @@ function shotResult() {
   if (shotOcr.meta === null || (shotOcr.text === null && !shotOcr.error)) return { state: "reading" };
   const utr = $("#fUtr").value.trim();
   const ctx = { utr, total: orderTotal(), settings, when: Date.now(), lines: shotOcr.lines, mainDigits: shotOcr.mainDigits, bigReads: shotOcr.bigReads };
+  if (!shotOcr.error && (shotOcr.text || "").replace(/\s/g, "").length < 15) {
+    shotOcr.error = new Error("almost no text could be read from the screenshot");
+  }
   if (shotOcr.error) {
     // couldn't read the text, but the file's hidden labels still count
     const j = KG.judgeScreenshot("", shotOcr.meta, ctx);
@@ -485,8 +488,14 @@ function showShotStatus() {
     if (useBtn) useBtn.onclick = () => { $("#fUtr").value = r.utrSeen; showShotStatus(); };
     return;
   }
-  if (r.state === "unavailable") { box.classList.add("meh"); box.textContent = "Couldn't read the screenshot automatically — the owner will check it."; return; }
-  if (!r.utrTyped) { box.textContent = "✓ Screenshot looks fine. Now type the 12-digit UTR from it."; return; }
+  if (r.state === "unavailable") { box.classList.add("meh"); box.textContent = "⚠ Couldn't read this screenshot clearly. Type the 12-digit UTR from your UPI app (payment details → UPI Ref No.). The owner will check the payment."; return; }
+  if (!r.utrTyped) {
+    box.classList.add("meh");
+    box.textContent = (r.utrCandidates || []).length
+      ? "✓ Screenshot read. Check the UTR above."
+      : "⚠ Couldn't find a 12-digit UTR in the screenshot. Type it from your UPI app (payment details → UPI Ref No.), or upload a screenshot where the Ref No. is visible.";
+    return;
+  }
   if (r.utr && r.amount) { box.classList.add("good"); box.textContent = `✓ UTR and ${rupeesExact(orderTotal())} found in your screenshot`; return; }
   box.classList.add("meh");
   box.textContent = !r.utr
@@ -496,7 +505,11 @@ function showShotStatus() {
 
 // Fill the UTR from the screenshot when the student hasn't typed one yet.
 function autoFillUtr() {
-  if (!shotOcr || !shotOcr.text) return;
+  if (!shotOcr) return;
+  if (!shotOcr.text || shotOcr.text.replace(/\s/g, "").length < 15) {
+    $("#utrHint").innerHTML = "⚠ Couldn't read the screenshot clearly — please type the UTR (UPI app → payment details → UPI Ref No.).";
+    return;
+  }
   const c = KG.utrCandidates(shotOcr.text);
   const box = $("#fUtr"), hint = $("#utrHint");
   if (!c.length) {

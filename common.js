@@ -238,6 +238,25 @@
     return lines.sort((a, b) => b.h - a.h)[0].text;
   }
 
+  async function blackAndWhite(source, width, thr) {
+    const bmp = await createImageBitmap(source);
+    const k = width / bmp.width;
+    const c = document.createElement("canvas");
+    c.width = width; c.height = Math.round(bmp.height * k);
+    const g = c.getContext("2d", { willReadFrequently: true });
+    g.imageSmoothingQuality = "high";
+    g.drawImage(bmp, 0, 0, c.width, c.height);
+    bmp.close && bmp.close();
+    if (!thr) return c; // just enlarged
+    const img = g.getImageData(0, 0, c.width, c.height), p = img.data;
+    for (let i = 0; i < p.length; i += 4) {
+      const v = 0.299 * p[i] + 0.587 * p[i + 1] + 0.114 * p[i + 2] < thr ? 0 : 255;
+      p[i] = p[i + 1] = p[i + 2] = v;
+    }
+    g.putImageData(img, 0, 0);
+    return c;
+  }
+
   // Returns { text, lines:[{text, h}], mainDigits, bigReads }
   //   h = height of each text line (the payment amount is the biggest)
   //   mainDigits = digits-only re-read of that biggest amount line
@@ -278,6 +297,21 @@
         mainDigits = (d2.text || "").trim();
       }
     } catch (e) { /* the normal reading still counts */ }
+    // No UTR found? Read the WHOLE screenshot again looking only for numbers —
+    // small grey "Ref. No" text is often missed by the normal read.
+    let text = data.text || "";
+    if (source instanceof Blob && !utrCandidates(text).length) {
+      // faint grey text on a light background → make it pure black on white
+      for (const [width, thr] of [[1400, 200], [2000, 0], [1400, 175]]) {
+        try {
+          const c = await blackAndWhite(source, width, thr);
+          const { data: d3 } = await worker.recognize(c);
+          const found = (d3.text || "").split(/\n+/).filter((l) => utrCandidates(l).length);
+          if (found.length) { text += "\n" + found.join("\n"); break; }
+        } catch (e) { /* ignore */ }
+      }
+    }
+
     // two extra reads of the big amount, at two sizes
     const bigReads = [];
     if (source instanceof Blob) {
@@ -285,7 +319,7 @@
         try { const t = await bigNumberAt(source, width); if (t) bigReads.push(t); } catch (e) { /* ignore */ }
       }
     }
-    return { text: data.text || "", lines: lines.map(({ text, h, y }) => ({ text, h, y })), mainDigits, bigReads };
+    return { text, lines: lines.map(({ text, h, y }) => ({ text, h, y })), mainDigits, bigReads };
   }
 
   // Letters OCR confuses with digits, fixed only inside number-like chunks.
