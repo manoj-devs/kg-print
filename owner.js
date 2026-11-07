@@ -189,6 +189,9 @@ function openVerify(o) {
   let pref = "1";
   try { pref = localStorage.getItem("kg_open_job") ?? "1"; } catch (e) { /* ignore */ }
   $("#verOpenJob").checked = pref === "1";
+  const many = o.files.length > 1 && !o.files_deleted;
+  $("#verOpenJob").closest("label").hidden = !many;
+  $("#verOneFile").hidden = many;
   $("#verifyModal").hidden = false;
 }
 async function confirmVerify() {
@@ -197,9 +200,9 @@ async function confirmVerify() {
   $("#verifyModal").hidden = true;
   // Open one window per document FIRST (inside the tap, so the browser allows it),
   // save "accepted", then load each document into its window.
-  const wantDocs = $("#verOpenJob").checked && !o.files_deleted;
+  const wantDocs = o.files.length > 1 && $("#verOpenJob").checked && !o.files_deleted;
   const wins = wantDocs ? openDocWindows(o) : [];
-  const saved = await setStatus(o, { status: "queued" }, `${o.token} accepted — student notified`);
+  const saved = await setStatus(o, { status: "queued" }, o.files.length > 1 ? `${o.token} accepted — student notified` : `${o.token} accepted — tap ⬇ Download on the card`);
   if (!wantDocs) return;
   if (!saved) { wins.forEach((w) => w && w.close()); return; }
   loadDocWindows(o, wins);
@@ -359,14 +362,14 @@ function cardHTML(o) {
       <span class="ficon ${esc(f.kind)}">${KIND_LABEL[f.kind] || "FILE"}</span>
       <div class="meta"><div title="${esc(f.name)}">${esc(f.name)}</div>
         <small><b>${f.pages}p × ${f.copies}</b> · ${f.color ? "<b>COLOUR</b>" : "B/W"} · ${f.double ? "2-side" : "1-side"} · ${rupees(f.price)}</small>${flag ? "<br>" + flag : ""}</div>
-      ${o.files_deleted ? `<small class="muted">deleted</small>` : `<button class="btn small" data-act="open" data-i="${i}">Open</button>`}
+      ${o.files_deleted ? `<small class="muted">deleted</small>` : `<span class="fbtns"><button class="btn small primary" data-act="dl" data-i="${i}">⬇ Download</button><button class="btn small" data-act="open" data-i="${i}" title="View / print">👁</button></span>`}
     </div>`;
   }).join("");
 
   const actions = {
     payment_review: `<button class="btn ok" data-act="verify">✓ Payment received</button><button class="btn bad" data-act="reject">✕ Reject</button>`,
-    queued: `<button class="btn" data-act="job">📂 Open all docs</button><button class="btn primary" data-act="ready">🖨 Printed — mark ready</button><button class="btn small ghost" data-act="back">↺</button>`,
-    ready: `<button class="btn dark" data-act="collected">✓ Collected</button><button class="btn small" data-act="job" title="Open all documents">📂</button><a class="btn small" href="${waLink(o)}" target="_blank" rel="noopener">WhatsApp</a><button class="btn small ghost" data-act="back">↺</button>`,
+    queued: `${o.files.length > 1 && !o.files_deleted ? `<button class="btn" data-act="job">📂 Open all ${o.files.length} docs</button>` : ""}<button class="btn primary" data-act="ready">🖨 Printed — mark ready</button><button class="btn small ghost" data-act="back">↺</button>`,
+    ready: `<button class="btn dark" data-act="collected">✓ Collected</button>${o.files.length > 1 && !o.files_deleted ? `<button class="btn small" data-act="job" title="Open all documents">📂</button>` : ""}<a class="btn small" href="${waLink(o)}" target="_blank" rel="noopener">WhatsApp</a><button class="btn small ghost" data-act="back">↺</button>`,
     collected: `<button class="btn small ghost" data-act="back">↺ Move back</button>`,
     rejected: `<button class="btn small ghost" data-act="back">↺ Move back to verify</button>`,
   }[o.status];
@@ -502,6 +505,18 @@ async function onGridClick(e) {
   if (!o) return;
   const act = btn.dataset.act;
 
+  if (act === "dl") {
+    const i = +btn.dataset.i, f = o.files[i];
+    const name = `${o.token}_${i + 1}_${f.name}`.replace(/[\\/:*?"<>|]+/g, "_");
+    try {
+      const url = await signedUrl("prints", f.path, name); // server sends it as a download
+      const a = document.createElement("a");
+      a.href = url; a.download = name; a.rel = "noopener";
+      document.body.appendChild(a); a.click(); a.remove();
+      btn.textContent = "✓ Downloaded";
+    } catch (err) { toast("Couldn't download: " + err.message, "error"); }
+    return;
+  }
   if (act === "open") {
     const i = +btn.dataset.i;
     const w = window.open(viewUrl(o, i), `kgdoc-${o.id}-${i}`);

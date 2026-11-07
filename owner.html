@@ -11,8 +11,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=20261107c">
-  <link rel="stylesheet" href="owner.css?v=20261107c">
+  <link rel="stylesheet" href="styles.css?v=20261107d">
+  <link rel="stylesheet" href="owner.css?v=20261107d">
 </head>
 <body>
   <header class="topbar">
@@ -94,8 +94,9 @@
       <p class="muted" style="font-size:13px">UTR <b id="verUtr"></b> · <span id="verWho"></span></p>
       <label class="override" style="background:#f1efe8;text-align:left">
         <input type="checkbox" id="verOpenJob" checked>
-        <span><b>Open all documents</b> — each in its own window, with Download &amp; Print</span>
+        <span><b>Open every document in its own tab</b> to download / print</span>
       </label>
+      <p class="hint" id="verOneFile" hidden style="margin:0 0 10px">1 document — after accepting, tap <b>⬇ Download</b> on the order card.</p>
       <button class="btn ok big block" id="verYes">✓ Yes, I received it</button>
       <button class="btn block" style="margin-top:8px" id="verNo">Not yet / cancel</button>
     </div>
@@ -164,8 +165,8 @@
   <div id="toasts"></div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
-  <script src="config.js?v=20261107c"></script>
-  <script src="common.js?v=20261107c"></script>
-  <script src="owner.js?v=20261107c"></script>
+  <script src="config.js?v=20261107d"></script>
+  <script src="common.js?v=20261107d"></script>
+  <script src="owner.js?v=20261107d"></script>
 </body>
 </html>

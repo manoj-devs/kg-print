@@ -66,3 +66,5 @@
   #topActions .btn { padding: 0 8px; }
 }
 .risk { background: var(--bad); color: #fff; font-size: 13px; font-weight: 700; padding: 8px 12px; }
+
+.fbtns { display: inline-flex; gap: 6px; flex: none; }
