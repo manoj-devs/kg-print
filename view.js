@@ -62,7 +62,7 @@ async function show() {
   $("#name").textContent = f.name;
   $("#name").title = f.name;
   $("#count").textContent = order.files.length > 1 ? `File ${index + 1} of ${order.files.length}` : "";
-  $("#spec").innerHTML = `
+  $("#spec").innerHTML = `${f.range ? `<span class="color">ONLY pages ${esc(f.range)}</span>` : ""}
     <span>${f.pages} page${f.pages > 1 ? "s" : ""}</span>
     <span>× ${f.copies} cop${f.copies > 1 ? "ies" : "y"}</span>
     <span class="${f.color ? "color" : ""}">${f.color ? "COLOUR" : "B/W"}</span>

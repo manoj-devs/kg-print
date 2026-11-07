@@ -11,8 +11,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=20261107f">
-  <link rel="stylesheet" href="owner.css?v=20261107f">
+  <link rel="stylesheet" href="styles.css?v=20261107h">
+  <link rel="stylesheet" href="owner.css?v=20261107h">
 </head>
 <body>
   <header class="topbar">
@@ -83,6 +83,20 @@
       <p id="newInfo"></p>
       <button class="btn primary block" id="newView">View order</button>
     </div>
+  </div>
+
+  <!-- adjust pages -->
+  <div class="modal" id="adjustModal" hidden>
+    <form class="modal-box left" id="adjustForm">
+      <h2>Adjust pages · <span id="adjToken"></span></h2>
+      <p class="muted" style="font-size:13px">Opened the file and the page count is different? Type the real number of pages to print. The student is told the new amount.</p>
+      <div id="adjFiles" class="adj-files"></div>
+      <div class="adj-sum" id="adjSummary"></div>
+      <div class="row" style="justify-content:flex-end;margin-top:12px">
+        <button type="button" class="btn" id="adjCancel">Cancel</button>
+        <button type="submit" class="btn primary">Save &amp; tell student</button>
+      </div>
+    </form>
   </div>
 
   <!-- Chrome blocked extra tabs -->
@@ -180,8 +194,8 @@
   <div id="toasts"></div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
-  <script src="config.js?v=20261107f"></script>
-  <script src="common.js?v=20261107f"></script>
-  <script src="owner.js?v=20261107f"></script>
+  <script src="config.js?v=20261107h"></script>
+  <script src="common.js?v=20261107h"></script>
+  <script src="owner.js?v=20261107h"></script>
 </body>
 </html>

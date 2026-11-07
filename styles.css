@@ -229,3 +229,13 @@ code { background: #f1efe8; padding: 1px 5px; border-radius: 5px; font-size: 13p
 .pay-step .btn { flex: 1; }
 .step-mini { flex: none; width: 24px; height: 24px; border-radius: 50%; background: var(--ink); color: #fff; font-size: 12px; font-weight: 700; display: grid; place-items: center; }
 .qr-saved { color: var(--ok) !important; font-weight: 600; }
+
+.range-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--line); }
+.range-label { font-size: 12px; font-weight: 600; color: var(--muted); }
+.range-in { width: 130px !important; min-height: 36px !important; padding: 6px 8px !important; }
+.range-msg { font-size: 12px; color: var(--ok); font-weight: 600; }
+.range-msg.err { color: var(--bad); }
+.word-tip { background: #fff7d1; border-radius: 8px; padding: 8px 10px; margin-top: 10px; }
+.qpos { display: inline-block; font-size: 12px; font-weight: 700; color: var(--primary); background: var(--primary-soft); border-radius: 99px; padding: 2px 9px; margin-left: 6px; }
+.adjust { margin: 8px 0 0; padding: 8px 10px; border-radius: 10px; font-size: 13px; background: var(--warn-soft); color: #5c3500; border: 1px solid #f3d9a4; }
+.adjust.refund { background: var(--ok-soft); color: #0d4d26; border-color: #bfe3c9; }

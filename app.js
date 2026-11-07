@@ -26,15 +26,34 @@ let ocrFails = 0;        // how many times the UTR wasn't found in the screensho
 // ---- unique paise: a random 1–99 paise added to every order so the owner can
 // find this exact payment in his UPI app. Kept on this device until the order
 // is placed, so it doesn't change if the student reloads after paying.
-function getPaise() {
-  let p = parseInt(localStorageGet("kg_paise"), 10);
-  if (!(p >= 1 && p <= 99)) {
-    p = 1 + Math.floor(Math.random() * 99);
-    localStorageSet("kg_paise", String(p));
-  }
+let memPaise = null; // fallback when the browser blocks storage
+function newPaise() {
+  const used = new Set((myOrders || []).filter((o) => Date.now() - new Date(o.created_at) < 2 * 864e5).map((o) => o.paise));
+  let p;
+  do { p = 1 + Math.floor(Math.random() * 99); } while (used.has(p) && used.size < 90);
+  memPaise = { p, t: Date.now() };
+  localStorageSet("kg_paise", JSON.stringify(memPaise));
   return p;
 }
-function resetPaise() { try { localStorage.removeItem("kg_paise"); } catch (e) { /* ignore */ } }
+function getPaise() {
+  let rec = null;
+  try { rec = JSON.parse(localStorageGet("kg_paise") || "null"); } catch (e) { rec = null; }
+  rec = rec || memPaise;
+  const fresh = rec && rec.p >= 1 && rec.p <= 99 && Date.now() - rec.t < 30 * 60000;
+  // paying right now? keep the amount they're paying, even if it's a bit older
+  if (rec && rec.p >= 1 && rec.p <= 99 && (fresh || payingSince)) return rec.p;
+  return newPaise();
+}
+// new amount if the stored paise were already used by one of my orders
+function checkPaiseNotReused() {
+  let rec = null;
+  try { rec = JSON.parse(localStorageGet("kg_paise") || "null"); } catch (e) { rec = null; }
+  if (rec && (myOrders || []).some((o) => o.paise === rec.p && new Date(o.created_at).getTime() >= rec.t - 60000)) {
+    newPaise();
+    updateTotals();
+  }
+}
+function resetPaise() { memPaise = null; try { localStorage.removeItem("kg_paise"); } catch (e) { /* ignore */ } }
 
 init();
 
@@ -213,7 +232,7 @@ function addFiles(fileList) {
     if (file.size === 0) { toast(`${file.name} is empty`, "error"); continue; }
     const it = {
       id: crypto.randomUUID(), file, name: file.name, kind,
-      pages: 1, pagesSource: kind === "image" ? "auto" : "manual",
+      pages: 1, total: 1, range: "", rangeMode: "all", rangeErr: "", pagesSource: kind === "image" ? "auto" : "manual",
       copies: 1, color: kind === "image", double: false,
       loading: true,
     };
@@ -241,27 +260,57 @@ async function countPages(it) {
     const buf = await it.file.arrayBuffer();
     if (it.kind === "pdf") {
       const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
-      it.pages = pdf.numPages;
+      it.total = pdf.numPages;
       it.pagesSource = "auto";
       pdf.destroy();
     } else if (it.kind === "docx") {
+      // Word files have no fixed pages, so we combine two things Word saves:
+      //  1) the page count Word stored when the file was last saved (docProps/app.xml)
+      //  2) the page-break markers Word writes while laying out the text
       const zip = await JSZip.loadAsync(buf);
-      const xml = zip.file("docProps/app.xml") ? await zip.file("docProps/app.xml").async("string") : "";
-      const m = xml.match(/<Pages>(\d+)<\/Pages>/);
-      if (m && +m[1] > 0) { it.pages = +m[1]; it.pagesSource = "estimate"; }
+      const app = zip.file("docProps/app.xml") ? await zip.file("docProps/app.xml").async("string") : "";
+      const doc = zip.file("word/document.xml") ? await zip.file("word/document.xml").async("string") : "";
+      const saved = +((app.match(/<Pages>(\d+)<\/Pages>/) || [])[1] || 0);
+      const rendered = (doc.match(/<w:lastRenderedPageBreak\s*\/>/g) || []).length;
+      const hard = (doc.match(/<w:br [^>]*w:type="page"[^>]*\/>/g) || []).length + (doc.match(/<w:pageBreakBefore(?:\s*\/>|\s+w:val="(?:1|true|on)")/g) || []).length;
+      const est = Math.max(saved, rendered ? rendered + 1 : 0, hard + 1);
+      if (saved || rendered || hard) { it.total = est; it.pagesSource = "estimate"; }
       else it.pagesSource = "manual";
     }
+    applyRange(it);
   } catch (e) {
     it.pagesSource = "manual";
     toast(`Couldn't count pages in ${it.name}. Please type the page count.`, "warn", 6000);
   }
 }
 
+// "1-5, 8, 10-12" → number of pages, checked against the document's page count
+function parseRange(text, total) {
+  const parts = String(text || "").replace(/\s+/g, "").split(",").filter(Boolean);
+  if (!parts.length) return { error: "Type the pages, e.g. 1-5, 8" };
+  const seen = new Set();
+  for (const p of parts) {
+    const m = p.match(/^(\d+)(?:-(\d+))?$/);
+    if (!m) return { error: `"${p}" isn't a page or range (use like 1-5, 8)` };
+    const a = +m[1], b = m[2] ? +m[2] : a;
+    if (a < 1 || b < a) return { error: `"${p}" isn't valid` };
+    if (b > total) return { error: `This file has only ${total} page${total > 1 ? "s" : ""}` };
+    for (let i = a; i <= b; i++) seen.add(i);
+  }
+  return { pages: seen.size };
+}
+function applyRange(it) {
+  it.rangeErr = "";
+  if (it.kind === "image" || it.rangeMode !== "custom") { it.pages = it.total; return; }
+  const r = parseRange(it.range, it.total);
+  if (r.error) { it.rangeErr = r.error; it.pages = it.total; } else it.pages = r.pages;
+}
+
 function pagesNote(it) {
   if (it.loading) return `<span class="spinner"></span> counting pages…`;
   if (it.kind === "image") return "Photo · 1 page per copy";
-  if (it.pagesSource === "auto") return `${it.pages} page${it.pages > 1 ? "s" : ""} (counted)`;
-  if (it.pagesSource === "estimate") return `<span class="warn">≈ ${it.pages} pages — please check</span>`;
+  if (it.pagesSource === "auto") return `${it.total} page${it.total > 1 ? "s" : ""} (counted)`;
+  if (it.pagesSource === "estimate") return `<span class="warn">≈ ${it.total} pages (Word estimate) — please check</span>`;
   return `<span class="warn">Enter the number of pages</span>`;
 }
 
@@ -277,7 +326,7 @@ function renderItems() {
         <button type="button" class="icon-btn" data-act="remove" aria-label="Remove">✕</button>
       </div>
       <div class="file-opts">
-        <label>Pages<input type="number" min="1" max="2000" data-f="pages" value="${it.pages}" ${locked || it.loading ? "readonly" : ""}></label>
+        <label>${it.kind === "image" ? "Pages" : "Total pages"}<input type="number" min="1" max="2000" data-f="pages" value="${it.total}" ${locked || it.loading ? "readonly" : ""}></label>
         <label>Copies<input type="number" min="1" max="100" data-f="copies" value="${it.copies}"></label>
         <div><div class="seg" data-f="color">
           <button type="button" data-v="0" class="${!it.color ? "on" : ""}">B/W</button>
@@ -287,6 +336,14 @@ function renderItems() {
           <button type="button" data-v="1" class="${it.double ? "on" : ""}">2-side</button></div></div>
         <div class="fprice" data-price></div>
       </div>
+      ${it.kind === "image" || it.loading ? "" : `<div class="range-row">
+        <span class="range-label">Print</span>
+        <div class="seg" data-f="rangeMode">
+          <button type="button" data-v="all" class="${it.rangeMode !== "custom" ? "on" : ""}">All pages</button>
+          <button type="button" data-v="custom" class="${it.rangeMode === "custom" ? "on" : ""}">Only some pages</button></div>
+        ${it.rangeMode === "custom" ? `<input type="text" class="range-in" data-f="range" value="${esc(it.range)}" placeholder="e.g. 1-5, 8" inputmode="text">
+          <small class="range-msg ${it.rangeErr ? "err" : ""}" data-rangemsg>${it.rangeErr ? esc(it.rangeErr) : it.range ? `${it.pages} of ${it.total} pages` : ""}</small>` : ""}
+      </div>`}
     </div>`;
   }).join("");
   $("#wordHint").hidden = !items.some((i) => i.kind === "docx" || i.kind === "doc");
@@ -299,8 +356,14 @@ function onItemInput(e) {
   if (!row || !el.dataset.f) return;
   const it = items.find((i) => i.id === row.dataset.id);
   const n = parseInt(el.value, 10);
-  if (el.dataset.f === "pages") it.pages = Math.min(2000, Math.max(1, n || 1));
+  if (el.dataset.f === "pages") { it.total = Math.min(2000, Math.max(1, n || 1)); applyRange(it); }
   if (el.dataset.f === "copies") it.copies = Math.min(100, Math.max(1, n || 1));
+  if (el.dataset.f === "range") {
+    it.range = el.value;
+    applyRange(it);
+    const msg = row.querySelector("[data-rangemsg]");
+    if (msg) { msg.textContent = it.rangeErr || (it.range ? `${it.pages} of ${it.total} pages` : ""); msg.classList.toggle("err", !!it.rangeErr); }
+  }
   updateTotals();
 }
 
@@ -316,8 +379,10 @@ function onItemClick(e) {
   const btn = e.target.closest(".seg button");
   if (btn) {
     const f = btn.parentElement.dataset.f;
-    it[f] = btn.dataset.v === "1";
+    if (f === "rangeMode") { it.rangeMode = btn.dataset.v; applyRange(it); }
+    else it[f] = btn.dataset.v === "1";
     renderItems();
+    if (f === "rangeMode" && it.rangeMode === "custom") { const inp = $(`.file[data-id="${it.id}"] .range-in`); inp && inp.focus(); }
   }
 }
 
@@ -426,8 +491,8 @@ function openUpiApp(key) {
 }
 
 // ---------------- leaving to pay → coming back ----------------
-let payingSince = 0;        // when the student started paying (tapped pay / copied)
-let leftForPayment = false; // the page went to the background after that
+var payingSince = 0;        // when the student started paying (tapped pay / copied)
+var leftForPayment = false; // the page went to the background after that
 function startPaying() { payingSince = Date.now(); leftForPayment = false; }
 function welcomeBack() {
   leftForPayment = false;
@@ -446,9 +511,24 @@ function startShotOcr(file) {
   job.promise = Promise.all([
     file.arrayBuffer().then((buf) => KG.inspectImage(buf, file)).then((m) => { job.meta = m; }).catch(() => { job.meta = {}; }),
     KG.ocrImage(file).then((res) => { job.text = res.text; job.lines = res.lines; job.mainDigits = res.mainDigits; job.bigReads = res.bigReads; if (shotOcr === job) autoFillUtr(); }).catch((e) => { job.error = e; console.warn("OCR failed", e); }),
-  ]).finally(() => { if (shotOcr === job) showShotStatus(); });
+  ]).then(() => checkReuse(job)).finally(() => { if (shotOcr === job) showShotStatus(); });
   shotOcr = job;
   showShotStatus();
+}
+
+// Was this screenshot, or the payment (UTR) in it, already used for an order?
+async function checkReuse(job) {
+  try {
+    const sha = await sha256Hex(job.file);
+    const cands = job.text ? KG.utrCandidates(job.text).slice(0, 4) : [];
+    const { data: first } = await sb.rpc("check_payment", { p_utr: cands[0] || "000000000000", p_sha: sha });
+    if (first === "shot") { job.reused = { shot: true }; return; }
+    if (first === "utr") { job.reused = { utr: cands[0] }; return; }
+    for (const c of cands.slice(1)) {
+      const { data } = await sb.rpc("check_payment", { p_utr: c, p_sha: "0".repeat(64) });
+      if (data === "utr") { job.reused = { utr: c }; return; }
+    }
+  } catch (e) { /* checked again on submit */ }
 }
 
 // Everything the screenshot tells us, judged against this order.
@@ -466,7 +546,11 @@ function shotResult() {
     return { state: "unavailable", hard: j.hard.filter((h) => h.code === "ai" || h.code === "edited") };
   }
   const j = KG.judgeScreenshot(shotOcr.text, shotOcr.meta, ctx);
-  // a wrong-time/date result only makes sense once we know which UTR they mean; the rest is always definite
+  if (shotOcr.reused) {
+    j.hard.unshift({ code: "reused", proof: true, fake: true, msg: shotOcr.reused.shot
+      ? "This screenshot was already used for another order. Each payment can be used only once — pay for this order and upload its screenshot."
+      : `This payment (UTR ${shotOcr.reused.utr}) was already used for another order. Each payment can be used only once — pay for this order and upload its screenshot.` });
+  }
   return { state: "read", ...j, utrTyped: /^\d{12}$/.test(utr) };
 }
 
@@ -567,6 +651,8 @@ async function submitOrder(e) {
   if (!flat) return fail("Enter your flat / room number", "#fFlat");
   if (!items.length) return fail("Add at least one file to print");
   if (items.some((i) => i.loading)) return fail("Wait — still counting pages");
+  const badRange = items.find((i) => i.rangeMode === "custom" && i.rangeErr);
+  if (badRange) return fail(`${badRange.name}: ${badRange.rangeErr}`);
   if (!/^\d{12}$/.test(utr)) return fail("UTR must be exactly 12 digits", "#fUtr");
   if (!shot) return fail("Upload your payment screenshot", "#fShot");
   if (!shot.type.startsWith("image/")) return fail("Screenshot must be an image", "#fShot");
@@ -634,6 +720,7 @@ async function submitOrder(e) {
       files.push({
         path, name: it.name, kind: it.kind, size: it.file.size,
         pages: it.pages, pages_source: it.pagesSource,
+        total_pages: it.total, range: it.kind !== "image" && it.rangeMode === "custom" ? it.range.replace(/\s+/g, "").replace(/,/g, ", ") : null,
         copies: it.copies, color: it.color, double: it.double,
       });
     }
@@ -714,6 +801,8 @@ async function loadMyOrders() {
   if (error) { $("#ordersList").innerHTML = `<div class="empty">Couldn't load orders: ${esc(error.message)}</div>`; return; }
   myOrders = data;
   renderOrders();
+  checkPaiseNotReused();
+  refreshQueue();
 
   if (ordersChannel) sb.removeChannel(ordersChannel);
   ordersChannel = sb.channel("my-orders-" + user.id)
@@ -721,6 +810,14 @@ async function loadMyOrders() {
       if (p.eventType === "DELETE") { myOrders = myOrders.filter((o) => o.id !== p.old.id); renderOrders(); return; }
       const old = myOrders.find((o) => o.id === p.new.id);
       if (old && old.status !== p.new.status) onStatusChange(p.new);
+      if (old && p.new.adjusted_total != null && Number(old.adjusted_total) !== Number(p.new.adjusted_total)) {
+        const d = Math.round((Number(p.new.adjusted_total) - Number(p.new.total)) * 100) / 100;
+        KG.chime(1);
+        const msg = d > 0 ? `please pay ${rupeesExact(d)} extra at the counter` : d < 0 ? `you get ${rupeesExact(-d)} back at the counter` : "no change in amount";
+        toast(`✏ ${p.new.token}: the shop corrected your pages — ${msg}.`, "warn", 10000);
+        KG.notify(`${p.new.token}: pages corrected`, `New total ${rupeesExact(p.new.adjusted_total)} — ${msg}.`);
+      }
+      if (old && old.status !== p.new.status) setTimeout(refreshQueue, 300);
       upsertOrder(p.new);
     })
     .subscribe();
@@ -743,6 +840,24 @@ async function refreshOrders() {
   });
   myOrders = data;
   renderOrders();
+  refreshQueue();
+}
+
+var queuePos = new Map();
+let queueBusy = false;
+async function refreshQueue() {
+  if (queueBusy || !user) return;
+  queueBusy = true;
+  try {
+    const waiting = myOrders.filter((o) => o.status === "payment_review" || o.status === "queued");
+    queuePos.clear();
+    for (const o of waiting) {
+      const { data } = await sb.rpc("queue_position", { p_order: o.id });
+      if (data) queuePos.set(o.id, data);
+    }
+    renderOrders();
+  } catch (e) { /* not critical */ }
+  queueBusy = false;
 }
 
 function upsertOrder(o) {
@@ -775,15 +890,19 @@ function renderOrders() {
   $("#activeCount").textContent = active || "";
   if (!myOrders.length) { box.innerHTML = `<div class="empty">No orders yet. Your orders will show here.</div>`; return; }
   box.innerHTML = myOrders.map((o) => {
-    const files = o.files.map((f) => `${esc(f.name)} <span class="muted">(${f.pages}p × ${f.copies}, ${f.color ? "colour" : "B/W"}${f.double ? ", 2-side" : ""})</span>`).join("<br>");
+    const files = o.files.map((f) => `${esc(f.name)} <span class="muted">(${f.range ? `pages ${esc(f.range)} = ` : ""}${f.pages}p × ${f.copies}, ${f.color ? "colour" : "B/W"}${f.double ? ", 2-side" : ""})</span>`).join("<br>");
+    const pos = queuePos.get(o.id);
+    const diff = o.adjusted_total != null ? Math.round((Number(o.adjusted_total) - Number(o.total)) * 100) / 100 : 0;
+    const adjust = o.adjusted_total == null ? "" : `<div class="adjust ${diff < 0 ? "refund" : ""}">✏ The shop corrected the pages${o.adjust_note ? ` (${esc(o.adjust_note)})` : ""}. New total <b>${rupeesExact(o.adjusted_total)}</b> — ${diff > 0 ? `please pay <b>${rupeesExact(diff)} extra</b> at the counter.` : diff < 0 ? `you get <b>${rupeesExact(-diff)} back</b> at the counter.` : "no change in amount."}</div>`;
     return `<div class="order">
       <div class="otoken"><b>${esc(o.token)}</b><small>${fmtDay(o.token_day)}</small></div>
       <div class="obody">
         <div class="row" style="justify-content:space-between">
-          <span class="badge st-${o.status}">${STATUS[o.status]}</span>
+          <span><span class="badge st-${o.status}">${STATUS[o.status]}</span>${pos ? `<span class="qpos">#${pos} in queue</span>` : ""}</span>
           <b>${rupeesExact(o.total)}</b>
         </div>
         <div style="font-size:13px;margin-top:6px">${files}</div>
+        ${adjust}
         ${o.status === "rejected" && o.reject_reason ? `<div class="banner bad" style="margin:8px 0 0;padding:8px 10px">Reason: ${esc(o.reject_reason)}${o.fake ? "<br><b>Marked as a fake payment.</b> 2 fake payments block your account." : ""}</div>` : ""}
         ${o.status === "ready" ? `<div class="banner" style="margin:8px 0 0;padding:8px 10px;background:var(--ok-soft);border-color:#bfe3c9">Show token <b>${esc(o.token)}</b> at the shop to collect.</div>` : ""}
         <small>Placed ${fmtTime(o.created_at)} · UTR ${esc(o.utr)}</small>

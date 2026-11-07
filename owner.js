@@ -83,6 +83,9 @@ function wireEvents() {
   $("#verNo").onclick = () => ($("#verifyModal").hidden = true);
   $("#verYes").onclick = confirmVerify;
   $("#verOpenJob").onchange = (e) => { try { localStorage.setItem("kg_open_job", e.target.checked ? "1" : "0"); } catch (err) { /* ignore */ } };
+  $("#adjCancel").onclick = () => ($("#adjustModal").hidden = true);
+  $("#adjustForm").onsubmit = saveAdjust;
+  $("#adjFiles").addEventListener("input", updateAdjust);
   $("#rejCancel").onclick = () => ($("#rejectModal").hidden = true);
   $("#rejectForm").onsubmit = submitReject;
   $("#rejectForm").addEventListener("change", (e) => {
@@ -235,7 +238,7 @@ async function fileUrl(o, i) {
   if (f.kind === "doc" || f.kind === "docx") return signedUrl("prints", f.path, name);
   if (f.kind === "image") {
     const [view, dl] = await Promise.all([signedUrl("prints", f.path), signedUrl("prints", f.path, name)]);
-    const info = `${f.name} · file ${i + 1} of ${o.files.length} · ${f.pages}p × ${f.copies} · ${f.color ? "COLOUR" : "B/W"} · ${f.double ? "both sides" : "single side"}`;
+    const info = `${f.name} · file ${i + 1} of ${o.files.length} · ${f.range ? `PAGES ${f.range} · ` : ""}${f.pages}p × ${f.copies} · ${f.color ? "COLOUR" : "B/W"} · ${f.double ? "both sides" : "single side"}`;
     const hash = new URLSearchParams({ u: view, d: dl, t: o.token, n: f.name, i: info }).toString();
     return new URL("img.html", location.href).href + "#" + hash;
   }
@@ -257,6 +260,51 @@ function showPopupHelp(blocked, total) {
 function openAllDocs(o) {
   if (o.files_deleted) return toast("Files of this order were already deleted.", "warn");
   loadDocWindows(o, openDocWindows(o));
+}
+
+// ---------------- adjust pages (e.g. wrong Word page count) ----------------
+function adjustInfo(o) {
+  if (o.adjusted_total == null) return "";
+  const d = Math.round((Number(o.adjusted_total) - Number(o.total)) * 100) / 100;
+  return `<div class="adj-box ${d < 0 ? "refund" : ""}">✏ Pages corrected${o.adjust_note ? `: ${esc(o.adjust_note)}` : ""}<br>
+    New total <b>${rupeesExact(o.adjusted_total)}</b> — ${d > 0 ? `<b>COLLECT ${rupeesExact(d)} extra</b>` : d < 0 ? `<b>GIVE BACK ${rupeesExact(-d)}</b>` : "no change"}</div>`;
+}
+let adjusting = null;
+function fileRate(f) {
+  if (f.rate != null) return Number(f.rate);
+  return Number(f.color ? (f.double ? settings.color_double : settings.color_single) : (f.double ? settings.bw_double : settings.bw_single));
+}
+function adjustTotal(o, pagesList) {
+  const sum = o.files.reduce((t, f, i) => t + Math.round(pagesList[i] * f.copies * fileRate(f) * 100) / 100, 0);
+  return Math.round((sum + (o.paise || 0) / 100) * 100) / 100;
+}
+function openAdjust(o) {
+  adjusting = o;
+  $("#adjToken").textContent = o.token;
+  $("#adjFiles").innerHTML = o.files.map((f, i) => `
+    <label class="adj-row"><span><b>${esc(f.name)}</b><br><small class="muted">${f.range ? `pages ${esc(f.range)} · ` : ""}× ${f.copies} · ${f.color ? "colour" : "B/W"} · ${f.double ? "2-side" : "1-side"} · ₹${fileRate(f)}/page</small></span>
+      <input type="number" min="1" max="2000" value="${f.pages}" data-i="${i}"></label>`).join("");
+  updateAdjust();
+  $("#adjustModal").hidden = false;
+}
+function adjPages() { return $$("#adjFiles input").map((x) => Math.max(1, Math.min(2000, parseInt(x.value, 10) || 1))); }
+function updateAdjust() {
+  const o = adjusting;
+  const newTotal = adjustTotal(o, adjPages());
+  const d = Math.round((newTotal - Number(o.total)) * 100) / 100;
+  $("#adjSummary").innerHTML = `Paid <b>${rupeesExact(o.total)}</b> → new total <b>${rupeesExact(newTotal)}</b><br>` +
+    (d > 0 ? `<span class="warn-t">Collect ${rupeesExact(d)} extra at the counter</span>` : d < 0 ? `<span class="ok-t">Give back ${rupeesExact(-d)} at the counter</span>` : "No change in amount");
+}
+async function saveAdjust(e) {
+  e.preventDefault();
+  const o = adjusting;
+  const pages = adjPages();
+  const changes = o.files.map((f, i) => (pages[i] !== f.pages ? `${f.name}: ${f.pages}→${pages[i]} pages` : null)).filter(Boolean);
+  if (!changes.length) { $("#adjustModal").hidden = true; return; }
+  const files = o.files.map((f, i) => ({ ...f, pages: pages[i], price: Math.round(pages[i] * f.copies * fileRate(f) * 100) / 100, pages_source: pages[i] !== f.pages ? "owner" : f.pages_source }));
+  const newTotal = adjustTotal(o, pages);
+  $("#adjustModal").hidden = true;
+  await setStatus(o, { files, adjusted_total: newTotal, adjust_note: changes.join("; ").slice(0, 300) }, `${o.token} updated — student notified`);
 }
 
 // ---------------- reject dialog ----------------
@@ -389,7 +437,7 @@ function cardHTML(o) {
     return `<div class="ofile">
       <span class="ficon ${esc(f.kind)}">${KIND_LABEL[f.kind] || "FILE"}</span>
       <div class="meta"><div title="${esc(f.name)}">${esc(f.name)}</div>
-        <small><b>${f.pages}p × ${f.copies}</b> · ${f.color ? "<b>COLOUR</b>" : "B/W"} · ${f.double ? "2-side" : "1-side"} · ${rupees(f.price)}</small>${flag ? "<br>" + flag : ""}</div>
+        <small>${f.range ? `<b class="range-tag">PRINT ONLY pages ${esc(f.range)}</b><br>` : ""}<b>${f.pages}p × ${f.copies}</b> · ${f.color ? "<b>COLOUR</b>" : "B/W"} · ${f.double ? "2-side" : "1-side"} · ${rupees(f.price)}</small>${flag ? "<br>" + flag : ""}</div>
       ${o.files_deleted ? `<small class="muted">deleted</small>` : `<span class="fbtns"><button class="btn small primary" data-act="dl" data-i="${i}">⬇ Download</button><button class="btn small" data-act="open" data-i="${i}" title="View / print">👁</button></span>`}
     </div>`;
   }).join("");
@@ -413,7 +461,9 @@ function cardHTML(o) {
       <div class="amt">${rupeesExact(o.total)}<br><small class="muted" style="font:400 12px Inter">${pages} pages</small></div>
     </div>
     ${o.status === "payment_review" || o.status === "rejected" ? payHTML(o) : `<div class="ocard-sec"><small class="muted">UTR</small> <span class="utr" style="font-size:14px">${esc(o.utr)}</span></div>`}
-    <div class="ocard-sec">${filesHTML}${o.notes ? `<div class="note">📝 ${esc(o.notes)}</div>` : ""}</div>
+    <div class="ocard-sec">${filesHTML}${o.notes ? `<div class="note">📝 ${esc(o.notes)}</div>` : ""}
+      ${adjustInfo(o)}
+      ${["payment_review", "queued", "ready"].includes(o.status) ? `<button class="btn small" data-act="adjust" style="margin-top:6px">✏ Adjust pages</button>` : ""}</div>
     ${o.status === "rejected" && o.reject_reason ? `<div class="ocard-sec"><small class="muted">Rejected:</small> ${esc(o.reject_reason)}</div>` : ""}
     <div class="actions">${actions}</div>
   </article>`;
@@ -533,6 +583,7 @@ async function onGridClick(e) {
   if (!o) return;
   const act = btn.dataset.act;
 
+  if (act === "adjust") return openAdjust(o);
   if (act === "dl") {
     const i = +btn.dataset.i, f = o.files[i];
     const name = `${o.token}_${i + 1}_${f.name}`.replace(/[\\/:*?"<>|]+/g, "_");

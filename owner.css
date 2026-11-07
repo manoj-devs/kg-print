@@ -68,3 +68,12 @@
 .risk { background: var(--bad); color: #fff; font-size: 13px; font-weight: 700; padding: 8px 12px; }
 
 .fbtns { display: inline-flex; gap: 6px; flex: none; }
+
+.range-tag { color: #9b1458; }
+.adj-box { margin-top: 8px; padding: 8px 10px; border-radius: 8px; background: var(--warn-soft); color: #5c3500; font-size: 13px; }
+.adj-box.refund { background: var(--ok-soft); color: #0d4d26; }
+.adj-files { display: grid; gap: 10px; margin: 12px 0; }
+.adj-row { display: flex; align-items: center; gap: 10px; justify-content: space-between; font-size: 14px; }
+.adj-row input { width: 90px; flex: none; }
+.adj-sum { background: #f7f6f2; border-radius: 10px; padding: 10px 12px; font-size: 14px; line-height: 1.6; }
+.warn-t { color: var(--warn); font-weight: 700; } .ok-t { color: var(--ok); font-weight: 700; }
