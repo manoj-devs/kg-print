@@ -133,6 +133,7 @@ function wireStaticEvents() {
     e.target.value = d.slice(0, 10);
   });
   $("#fUtr").addEventListener("input", (e) => {
+    e.target.dataset.auto = "0"; // the student typed it themselves
     e.target.value = e.target.value.replace(/\D/g, "").slice(0, 12);
     showShotStatus();
   });
@@ -436,7 +437,7 @@ function welcomeBack() {
   const card = $("#confirmCard");
   card.scrollIntoView({ behavior: "smooth", block: "start" });
   card.classList.remove("glow"); void card.offsetWidth; card.classList.add("glow");
-  setTimeout(() => { if (!$("#fUtr").value) $("#fUtr").focus({ preventScroll: true }); }, 700);
+
 }
 
 // ---------------- screenshot check ----------------
@@ -497,9 +498,17 @@ function showShotStatus() {
 function autoFillUtr() {
   if (!shotOcr || !shotOcr.text) return;
   const c = KG.utrCandidates(shotOcr.text);
-  if (c.length && !$("#fUtr").value.trim()) {
-    $("#fUtr").value = c[0];
-    toast("UTR filled in from your screenshot — check it matches your UPI app.", "ok", 5000);
+  const box = $("#fUtr"), hint = $("#utrHint");
+  if (!c.length) {
+    hint.innerHTML = "⚠ Couldn't read the UTR from the screenshot — please type it (UPI app → payment details → UPI Ref No.).";
+    return;
+  }
+  if (!box.value.trim() || box.dataset.auto === "1") {
+    box.value = c[0];
+    box.dataset.auto = "1";
+    hint.innerHTML = "✓ Filled from your screenshot — check it matches your UPI app.";
+    hint.classList.add("qr-saved");
+    showShotStatus();
   }
 }
 
@@ -673,6 +682,9 @@ function onOrderPlaced(order) {
   $("#fUtr").value = "";
   $("#fShot").value = "";
   shotFile = null;
+  $("#fUtr").dataset.auto = "0";
+  $("#utrHint").textContent = "Upload the screenshot above — we read the UTR from it. You can also type it.";
+  $("#utrHint").classList.remove("qr-saved");
   $("#shotPreview").hidden = true;
   $("#fNotes").value = "";
   $("#successToken").textContent = order.token;

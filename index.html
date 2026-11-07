@@ -117,15 +117,15 @@
 
           <div class="card" id="confirmCard" hidden>
             <div class="card-head"><span class="step-no">4</span><h2>Confirm your payment</h2></div>
-            <div class="banner welcome-back" id="backBanner" hidden>👋 <b>Welcome back!</b> If your payment was successful, take a screenshot of the payment details, then enter the UTR and upload it below.</div>
-            <label class="field"><span>UTR / UPI Ref. No. (12 digits)</span>
-              <input type="text" id="fUtr" inputmode="numeric" placeholder="e.g. 431298765432" autocomplete="off" required>
-              <div class="hint">Find it in your UPI app → payment details → "UPI Ref No." / "UTR". Not the Google transaction ID.</div>
-            </label>
+            <div class="banner welcome-back" id="backBanner" hidden>👋 <b>Welcome back!</b> Take a screenshot of the payment details and upload it below — we fill in the UTR for you.</div>
             <label class="field"><span>Payment screenshot</span>
               <input type="file" id="fShot" accept="image/*" required>
               <div class="hint">Take the screenshot on the payment <b>details</b> page, so the <b>amount</b> and <b>UTR / UPI Ref No.</b> are both visible.</div>
               <img id="shotPreview" class="shot-preview" alt="" hidden>
+            </label>
+            <label class="field"><span>UTR / UPI Ref. No. (12 digits)</span>
+              <input type="text" id="fUtr" inputmode="numeric" placeholder="Filled automatically from your screenshot" autocomplete="off" required>
+              <div class="hint" id="utrHint">Upload the screenshot above — we read the UTR from it. You can also type it.</div>
             </label>
             <div id="shotStatus" class="shot-status" hidden></div>
             <label id="overrideBox" class="override" hidden>
