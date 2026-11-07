@@ -217,3 +217,10 @@ code { background: #f1efe8; padding: 1px 5px; border-radius: 5px; font-size: 13p
 .welcome-back { background: var(--ok-soft); border-color: #bfe3c9; color: #0d4d26; }
 .card.glow { animation: glow 1.4s ease 2; }
 @keyframes glow { 50% { box-shadow: 0 0 0 4px var(--primary-soft), var(--shadow); border-color: var(--primary); } }
+
+.app-btns { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 12px; }
+.app-btn { flex-direction: column; min-height: 72px; gap: 6px; font-size: 14px; padding: 8px 4px; }
+.app-dot { width: 30px; height: 30px; border-radius: 50%; color: #fff; display: grid; place-items: center; font-size: 12px; font-weight: 700; }
+.other-ways { margin-top: 4px; font-size: 14px; }
+.other-ways summary { cursor: pointer; color: var(--muted); font-weight: 600; padding: 6px 0; }
+.qrbox #qr { background: #fff; padding: 10px; width: fit-content; margin: 0 auto; }

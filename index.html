@@ -82,27 +82,30 @@
             <p class="paise-note" id="paiseNote"></p>
             <div class="pay-grid">
               <div>
-                <h3 class="pay-opt">Option A · Pay manually <span class="badge st-ready" style="font-size:11px">works always</span></h3>
+                <h3 class="pay-opt">On your phone: tap your UPI app</h3>
+                <div class="app-btns">
+                  <button type="button" class="btn app-btn" data-app="gpay"><span class="app-dot" style="background:#1a73e8">G</span>GPay</button>
+                  <button type="button" class="btn app-btn" data-app="phonepe"><span class="app-dot" style="background:#5f259f">Pe</span>PhonePe</button>
+                  <button type="button" class="btn app-btn" data-app="paytm"><span class="app-dot" style="background:#00baf2">P</span>Paytm</button>
+                </div>
                 <ol class="manual-steps">
-                  <li>Copy the UPI ID
-                    <div class="upi-id"><span class="grow" id="upiIdText"></span><button type="button" class="btn small" id="copyUpi">Copy</button></div>
-                  </li>
-                  <li>Copy the exact amount
-                    <div class="upi-id"><span class="grow"><b id="manualAmt"></b></span><button type="button" class="btn small" id="copyAmt">Copy</button></div>
-                  </li>
-                  <li>Open GPay / PhonePe / Paytm → <b>Pay UPI ID</b> (or "To UPI ID") → paste both → pay.</li>
+                  <li>We <b>save the payment QR</b> to your gallery and open the app.</li>
+                  <li>In the app tap <b>Scan</b> → the <b>gallery / photo icon</b> → pick the QR we just saved.</li>
+                  <li>Check it shows <b id="manualAmt"></b> → pay.</li>
                   <li>Come back here — we'll take you to the last step.</li>
                 </ol>
-
-                <h3 class="pay-opt">Option B · Open UPI app directly</h3>
-                <a id="upiBtn" class="btn primary block" href="#">Pay <span id="upiBtnAmt"></span> with UPI app</a>
-                <p class="hint" style="margin:6px 0 0">Some apps block this with <i>"failed as per UPI risk policy"</i> — no money is taken. If that happens, use Option A.</p>
+                <details class="other-ways">
+                  <summary>Other ways to pay</summary>
+                  <p class="hint">Pay to UPI ID (may not work for every shop account):</p>
+                  <div class="upi-id"><span class="grow" id="upiIdText"></span><button type="button" class="btn small" id="copyUpi">Copy</button></div>
+                  <div class="upi-id" style="margin-top:6px"><span class="grow">Amount <b id="manualAmt2"></b></span><button type="button" class="btn small" id="copyAmt">Copy</button></div>
+                  <a id="upiBtn" class="btn small block" style="margin-top:8px" href="#">Open UPI app with amount <span id="upiBtnAmt"></span></a>
+                </details>
               </div>
               <div class="qrbox">
-                <h3 class="pay-opt" style="text-align:center">Option C · Scan QR</h3>
+                <h3 class="pay-opt" style="justify-content:center">On a laptop: scan this</h3>
                 <div id="qr"></div>
-                <p class="hint" style="margin:6px 0 0;text-align:center">On a laptop: scan with your phone's UPI app.</p>
-                <button type="button" class="btn small ghost" id="saveQr">⬇ Save QR</button>
+                <button type="button" class="btn small" id="saveQr" style="margin-top:8px">⬇ Save QR only</button>
               </div>
             </div>
           </div>

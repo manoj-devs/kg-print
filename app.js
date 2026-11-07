@@ -157,14 +157,14 @@ function wireStaticEvents() {
     catch (e) { toast(settings.upi_id); }
     startPaying();
   };
-  $("#saveQr").onclick = saveQr;
+  $("#saveQr").onclick = () => { saveQr(); toast("QR saved. Open your UPI app → Scan → gallery → pick it.", "ok", 6000); };
+  $$(".app-btn").forEach((btn) => (btn.onclick = () => openUpiApp(btn.dataset.app)));
   $("#copyAmt").onclick = async () => {
     const v = orderTotal().toFixed(2);
     try { await navigator.clipboard.writeText(v); toast(`Amount ${v} copied`, "ok", 2000); } catch (e) { toast(v); }
     startPaying();
   };
   $("#upiBtn").addEventListener("click", startPaying);
-  $("#saveQr").addEventListener("click", startPaying);
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) { if (payingSince) leftForPayment = true; return; }
     if (leftForPayment) welcomeBack();
@@ -338,6 +338,7 @@ function updateTotals() {
   $("#totalAmt").textContent = rupeesExact(total);
   $("#upiBtnAmt").textContent = rupeesExact(total);
   $("#manualAmt").textContent = rupeesExact(total);
+  $("#manualAmt2").textContent = rupeesExact(total);
   $("#upiIdText").textContent = settings.upi_id;
   $("#paiseNote").innerHTML = `Prints ${rupees(baseTotal())} + <b>${paise} paise</b> payment ID. Pay <b>exactly ${rupeesExact(total)}</b> — the paise help the shop find your payment instantly.`;
   showShotStatus();
@@ -363,16 +364,56 @@ function upiLink(total) {
   return `upi://pay?pa=${settings.upi_id}&${params.toString().replace(/\+/g, "%20")}`;
 }
 
+// A big, clean QR image (with the white border scanners need) for "scan from gallery".
+function qrImageDataUrl() {
+  const total = orderTotal();
+  const holder = document.createElement("div");
+  new QRCode(holder, { text: upiLink(total), width: 640, height: 640, correctLevel: QRCode.CorrectLevel.M });
+  const src = holder.querySelector("canvas");
+  const W = 800, H = 1000, c = document.createElement("canvas");
+  c.width = W; c.height = H;
+  const g = c.getContext("2d");
+  g.fillStyle = "#fff"; g.fillRect(0, 0, W, H);
+  g.fillStyle = "#17171a"; g.textAlign = "center";
+  g.font = "bold 44px sans-serif"; g.fillText(`Pay ${rupeesExact(total)}`, W / 2, 80);
+  g.font = "30px sans-serif"; g.fillText(`to ${settings.payee_name}`, W / 2, 125);
+  g.imageSmoothingEnabled = false;
+  g.drawImage(src, 80, 170, 640, 640);
+  g.font = "26px sans-serif"; g.fillStyle = "#555";
+  g.fillText("UPI app → Scan → gallery → pick this image", W / 2, 880);
+  g.fillText(settings.shop_name, W / 2, 930);
+  return c.toDataURL("image/png");
+}
+
 function saveQr() {
-  const c = $("#qr canvas");
-  const img = $("#qr img");
-  const url = c ? c.toDataURL("image/png") : img && img.src;
-  if (!url) return;
   const a = document.createElement("a");
-  a.href = url;
-  a.download = `kg-print-pay-${orderTotal()}.png`;
-  a.click();
-  toast("QR saved. Open your UPI app → Scan → pick from gallery.", "ok", 5000);
+  a.href = qrImageDataUrl();
+  a.download = `kg-print-pay-${orderTotal().toFixed(2)}.png`;
+  document.body.appendChild(a); a.click(); a.remove();
+  startPaying();
+}
+
+// Open just the app (its home screen) — the payment itself happens by scanning
+// the saved QR, which UPI allows even for small-merchant accounts.
+const UPI_APPS = {
+  gpay: { name: "GPay", pkg: "com.google.android.apps.nbu.paisa.user", scheme: "tez", ios: "gpay://" },
+  phonepe: { name: "PhonePe", pkg: "com.phonepe.app", scheme: "phonepe", ios: "phonepe://" },
+  paytm: { name: "Paytm", pkg: "net.one97.paytm", scheme: "paytmmp", ios: "paytmmp://" },
+};
+function openUpiApp(key) {
+  const app = UPI_APPS[key];
+  saveQr();
+  toast(`QR saved ✓ In ${app.name}: tap Scan → gallery → pick the QR`, "ok", 9000);
+  const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+  const isAndroid = /Android/i.test(navigator.userAgent);
+  if (!isIOS && !isAndroid) { toast("On a laptop, scan the QR on screen with your phone.", "warn", 6000); return; }
+  const url = isIOS ? app.ios : `intent://#Intent;scheme=${app.scheme};package=${app.pkg};end`;
+  // give the download a moment to start before leaving the page
+  setTimeout(() => { location.href = url; }, 700);
+  // if the app didn't open (not installed / blocked), say what to do
+  setTimeout(() => {
+    if (!document.hidden) toast(`Couldn't open ${app.name}. Open any UPI app yourself → Scan → gallery → pick the saved QR.`, "warn", 9000);
+  }, 3500);
 }
 
 // ---------------- leaving to pay → coming back ----------------
