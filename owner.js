@@ -223,23 +223,36 @@ function openDocWindows(o) {
 // (instant), Word files download straight away.
 async function directUrls(o) {
   const out = [];
-  for (let i = 0; i < o.files.length; i++) {
-    const f = o.files[i];
-    const word = f.kind === "doc" || f.kind === "docx";
-    const name = `${o.token}_${i + 1}_${f.name}`.replace(/[\\/:*?"<>|]+/g, "_");
-    out.push(await signedUrl("prints", f.path, word ? name : undefined));
-  }
+  for (let i = 0; i < o.files.length; i++) out.push(await fileUrl(o, i));
   return out;
 }
+// PDF → Chrome's own PDF viewer (has download + print)
+// Photo → tiny instant page with Download + Print buttons
+// Word → downloads straight away
+async function fileUrl(o, i) {
+  const f = o.files[i];
+  const name = `${o.token}_${i + 1}_${f.name}`.replace(/[\\/:*?"<>|]+/g, "_");
+  if (f.kind === "doc" || f.kind === "docx") return signedUrl("prints", f.path, name);
+  if (f.kind === "image") {
+    const [view, dl] = await Promise.all([signedUrl("prints", f.path), signedUrl("prints", f.path, name)]);
+    const info = `${f.name} · file ${i + 1} of ${o.files.length} · ${f.pages}p × ${f.copies} · ${f.color ? "COLOUR" : "B/W"} · ${f.double ? "both sides" : "single side"}`;
+    const hash = new URLSearchParams({ u: view, d: dl, t: o.token, n: f.name, i: info }).toString();
+    return new URL("img.html", location.href).href + "#" + hash;
+  }
+  return signedUrl("prints", f.path);
+}
+
 async function loadDocWindows(o, wins) {
   let urls;
   try { urls = await directUrls(o); }
   catch (err) { wins.forEach((w) => w && w.close()); return toast("Couldn't open files: " + err.message, "error"); }
   let blocked = 0;
   wins.forEach((w, i) => { if (w) w.location = urls[i]; else blocked++; });
-  if (blocked) {
-    toast(`${blocked} of ${o.files.length} tab(s) were blocked. Allow pop-ups for this site (address bar → 🚫 icon → Always allow), then tap 📂 Open all docs.`, "warn", 10000);
-  }
+  if (blocked) showPopupHelp(blocked, o.files.length);
+}
+function showPopupHelp(blocked, total) {
+  $("#popupHelpCount").textContent = `${blocked} of ${total}`;
+  $("#popupHelp").hidden = false;
 }
 function openAllDocs(o) {
   if (o.files_deleted) return toast("Files of this order were already deleted.", "warn");
@@ -533,11 +546,10 @@ async function onGridClick(e) {
     return;
   }
   if (act === "open") {
-    const i = +btn.dataset.i, f = o.files[i];
+    const i = +btn.dataset.i;
     const w = window.open("", `kgdoc-${o.id}-${i}`); // open first, inside the tap
     try {
-      const word = f.kind === "doc" || f.kind === "docx";
-      const url = await signedUrl("prints", f.path, word ? `${o.token}_${i + 1}_${f.name}` : undefined);
+      const url = await fileUrl(o, i);
       if (w) w.location = url; else location.href = url;
     } catch (err) { if (w) w.close(); toast("Couldn't open file: " + err.message, "error"); }
     return;
