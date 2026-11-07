@@ -199,12 +199,46 @@
         if (!ocrWorkerPromise) ocrWorkerPromise = Tesseract.createWorker("eng");
         await ocrWorkerPromise;
         await digitWorker();
+        await sparseWorker();
       } catch (e) { warmed = false; ocrWorkerPromise = null; }
     };
     (window.requestIdleCallback || ((f) => setTimeout(f, 1500)))(go);
   }
 
-  // Returns { text, lines:[{text, h}], mainDigits }
+  // Third reader: finds scattered numbers (sparse mode, digits only). Used on the
+  // TOP half of the screenshot shrunk down — very big text (like Paytm's ₹2.58)
+  // is often skipped by the normal reader but read well when made smaller.
+  let sparseWorkerPromise = null;
+  function sparseWorker() {
+    if (!sparseWorkerPromise) {
+      sparseWorkerPromise = (async () => {
+        const w = await Tesseract.createWorker("eng");
+        await w.setParameters({ tessedit_char_whitelist: "0123456789.,₹", tessedit_pageseg_mode: "11" });
+        return w;
+      })();
+    }
+    return sparseWorkerPromise;
+  }
+  // biggest number in the top half, read at one width
+  async function bigNumberAt(source, width) {
+    const bmp = await createImageBitmap(source);
+    const top = Math.round(bmp.height * 0.5);
+    const k = width / bmp.width;
+    const c = document.createElement("canvas");
+    c.width = width; c.height = Math.round(top * k);
+    const g = c.getContext("2d");
+    g.filter = "grayscale(1) contrast(1.3)";
+    g.drawImage(bmp, 0, 0, bmp.width, top, 0, 0, c.width, c.height);
+    bmp.close && bmp.close();
+    const w = await sparseWorker();
+    const { data } = await w.recognize(c);
+    const lines = (data.lines || []).map((l) => ({ text: (l.text || "").trim(), h: l.bbox ? l.bbox.y1 - l.bbox.y0 : 0 }))
+      .filter((l) => /\d/.test(l.text) && !/\d{8,}/.test(l.text.replace(/\D/g, "")) && l.text.replace(/\D/g, "").length <= 9);
+    if (!lines.length) return null;
+    return lines.sort((a, b) => b.h - a.h)[0].text;
+  }
+
+  // Returns { text, lines:[{text, h}], mainDigits, bigReads }
   //   h = height of each text line (the payment amount is the biggest)
   //   mainDigits = digits-only re-read of that biggest amount line
   async function ocrImage(source) {
@@ -223,7 +257,8 @@
       img = await prepForOcr(source, 900);
       ({ data } = await worker.recognize(img));
     }
-    const lines = (data.lines || []).map((l) => ({ text: (l.text || "").trim(), h: l.bbox ? l.bbox.y1 - l.bbox.y0 : 0, bbox: l.bbox }));
+    const H = img.height || 0;
+    const lines = (data.lines || []).map((l) => ({ text: (l.text || "").trim(), h: l.bbox ? l.bbox.y1 - l.bbox.y0 : 0, y: l.bbox ? l.bbox.y0 / (H || 1) : 0, bbox: l.bbox }));
     let mainDigits = null;
     try {
       const top = pickMainLine(lines);
@@ -243,28 +278,54 @@
         mainDigits = (d2.text || "").trim();
       }
     } catch (e) { /* the normal reading still counts */ }
-    return { text: data.text || "", lines: lines.map(({ text, h }) => ({ text, h })), mainDigits };
+    // two extra reads of the big amount, at two sizes
+    const bigReads = [];
+    if (source instanceof Blob) {
+      for (const width of [540, 380]) {
+        try { const t = await bigNumberAt(source, width); if (t) bigReads.push(t); } catch (e) { /* ignore */ }
+      }
+    }
+    return { text: data.text || "", lines: lines.map(({ text, h, y }) => ({ text, h, y })), mainDigits, bigReads };
   }
 
-  // Is this 12-digit UTR in the screenshot text? Allows 1 misread digit,
-  // and handles digits printed in groups ("4312 9876 5432").
+  // Letters OCR confuses with digits, fixed only inside number-like chunks.
+  const LOOKALIKE = { O: "0", o: "0", D: "0", Q: "0", I: "1", l: "1", "|": "1", i: "1", Z: "2", z: "2", S: "5", s: "5", G: "6", b: "6", T: "7", B: "8", g: "9", q: "9" };
+  function numberish(line) {
+    return line
+      .split(/\s+/)
+      .map((tok) => {
+        const d = (tok.match(/\d/g) || []).length;
+        return d >= 3 && d / tok.length >= 0.6 ? tok.replace(/./g, (c) => (/\d/.test(c) ? c : LOOKALIKE[c] || "")) : tok;
+      })
+      .join(" ")
+      .replace(/(\d)[\s-]+(?=\d)/g, "$1"); // "6309 1234 5678" -> "630912345678"
+  }
+
+  // All 12-digit numbers in the screenshot = possible UTRs. The one on a line that
+  // says Ref / UTR / UPI / transaction comes first.
+  function utrCandidates(text) {
+    const found = [];
+    for (const line of (text || "").split(/\n+/)) {
+      const keyword = /ref|utr|upi|transaction|txn/i.test(line);
+      for (const m of numberish(line).matchAll(/(?<!\d)\d{12}(?!\d)/g)) found.push({ utr: m[0], keyword });
+    }
+    found.sort((x, y) => (y.keyword ? 1 : 0) - (x.keyword ? 1 : 0));
+    return [...new Set(found.map((f) => f.utr))];
+  }
+
+  // Is this exact 12-digit UTR in the screenshot? (No digit is allowed to differ —
+  // otherwise someone could change the last digit and still pass.)
   function utrInText(text, utr) {
     if (!/^\d{12}$/.test(utr)) return false;
-    // In number-like chunks (mostly digits), fix letters OCR often confuses
-    // with digits; in normal words just keep any real digits.
-    const LOOKALIKE = { O: "0", o: "0", D: "0", Q: "0", I: "1", l: "1", "|": "1", i: "1", Z: "2", z: "2", S: "5", s: "5", G: "6", b: "6", T: "7", B: "8", g: "9", q: "9" };
-    const digits = text.split(/\s+/).map((tok) => {
-      const d = (tok.match(/\d/g) || []).length;
-      if (d >= 3 && d / tok.length >= 0.6) return tok.replace(/./g, (c) => (/\d/.test(c) ? c : LOOKALIKE[c] || ""));
-      return tok.replace(/\D/g, "");
-    }).join("");
-    if (digits.includes(utr)) return true;
-    for (let i = 0; i + 12 <= digits.length; i++) {
-      let miss = 0;
-      for (let j = 0; j < 12 && miss <= 1; j++) if (digits[i + j] !== utr[j]) miss++;
-      if (miss <= 1) return true;
-    }
-    return false;
+    if (utrCandidates(text).includes(utr)) return true;
+    const stream = (text || "").split(/\n+/).map(numberish).join(" ").replace(/\D/g, "");
+    return stream.includes(utr);
+  }
+  function digitsDiff(a, b) {
+    if (a.length !== b.length) return 99;
+    let n = 0;
+    for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) n++;
+    return n;
   }
 
   // Is the exact amount (with paise, e.g. 62.37) visible in the text?
@@ -378,7 +439,9 @@
     const withDigits = (lines || []).filter((l) => l.h > 0 && /\d/.test(l.text)
       && !/\d{1,2}:\d{2}/.test(l.text)              // not a time
       && !/\d{8,}/.test(l.text.replace(/\s/g, ""))  // not a UTR / phone / account number
-      && l.text.replace(/[^\d]/g, "").length <= 9);
+      && l.text.replace(/[^\d]/g, "").length <= 9
+      && (l.text.replace(/rs|inr/gi, "").match(/[a-z]/gi) || []).length <= 3 // not a sentence like "11,000 Gold Coins"
+      && (l.y === undefined || l.y < 0.55));          // the paid amount is in the top half
     if (!withDigits.length) return null;
     const all = (lines || []).filter((l) => l.h > 0).map((l) => l.h).sort((a, b) => a - b);
     const median = all[Math.floor(all.length / 2)] || 1;
@@ -396,11 +459,18 @@
     return [...out].filter((v) => v > 0);
   }
 
-  function mainAmount(lines, mainDigits) {
+  function mainAmount(lines, mainDigits, bigReads) {
     const top = pickMainLine(lines);
-    if (!top) return null;
-    const values = [...new Set([...amountsInLine(top.text), ...amountsFromDigits(mainDigits)])];
-    return values.length ? { text: top.text + (mainDigits ? ` / ${mainDigits}` : ""), values } : null;
+    const reads = [];
+    if (top) reads.push({ text: top.text, vals: amountsInLine(top.text) });
+    if (top && mainDigits) reads.push({ text: mainDigits, vals: amountsFromDigits(mainDigits) });
+    for (const t of bigReads || []) reads.push({ text: t, vals: amountsInLine(t) });
+    const used = reads.filter((r) => r.vals.length);
+    if (!used.length) return null;
+    const values = [...new Set(used.flatMap((r) => r.vals))];
+    // "sure" = at least two separate readings agree on the same amount
+    const agreed = values.filter((v) => used.filter((r) => r.vals.includes(v)).length >= 2);
+    return { text: used.map((r) => r.text).join(" / "), values, agreed };
   }
 
   // OCR mixes up some look-alike digits. Two amounts "match" if they have the same
@@ -457,54 +527,61 @@
     return { type, software, ai: aiHit ? aiHit[1] : null, w, h, phoneShape, tooSmall };
   }
 
-  // Put it all together.
-  //   hard = definite problems → the order is refused (student) / auto-rejected (owner)
-  //   soft = couldn't confirm → student retries, then may send for manual check
+  // Put it all together. Every problem in `hard` is either:
+  //   proof: true  → certain cheating (AI label, editing app, TEST/DEMO stamp, reused UTR).
+  //                  Never accepted. The owner's dashboard auto-rejects these as FAKE.
+  //   proof: false → the reader is fairly sure something is wrong (wrong UTR digits,
+  //                  wrong amount, old date…). Refused at first; after 2 tries the student
+  //                  may send it to the owner for a manual check (shown in red).
+  //   soft         → couldn't confirm (blurry etc.) — same retry → manual-check path.
   function judgeScreenshot(text, meta, ctx) {
+    const cands = utrCandidates(text);
     const r = {
       utr: utrInText(text, ctx.utr),
+      utrCandidates: cands,
       amount: amountInText(text, ctx.total),
       payee: payeeSeen(text, ctx.settings),
-      wrongAmounts: otherAmounts(text, ctx.total),
+      wrongAmounts: [],
       demo: ((text.match(/\b(test|demo|sample|dummy|fake|mock|specimen)\b/i) || [])[0]) || null,
       failed: /\b(failed|declined|pending|processing|reversed)\b/i.test(text),
       success: /\b(success|successful|completed|paid)\b/i.test(text),
       ...timeCheck(text, ctx.when),
       ...meta,
     };
-    // The big amount on the payment screen decides: it must be exactly this order's amount.
+    // a UTR that differs from the typed one by a digit or two
+    r.utrSeen = !r.utr && /^\d{12}$/.test(ctx.utr || "") ? cands.find((c) => digitsDiff(c, ctx.utr) <= 2) || null : null;
+
+    // The big amount on the payment screen
     const want = Math.round(Number(ctx.total) * 100);
-    const main = mainAmount(ctx.lines, ctx.mainDigits);
+    const main = mainAmount(ctx.lines, ctx.mainDigits, ctx.bigReads);
     r.mainAmount = main ? main.text : null;
-    const mainOk = main && main.values.some((v) => nearlySame(v, want));
-    if (mainOk) r.amount = true;
-    if (main && !mainOk && !r.amount) {
-      // show the reading closest to the expected amount (e.g. "258" -> ₹2.58, not ₹258)
-      const shown = main.values.slice().sort((a, b) => Math.abs(a - want) - Math.abs(b - want))[0];
-      r.wrongAmounts = [shown / 100, ...r.wrongAmounts.filter((x) => Math.round(x * 100) !== shown)];
-    }
+    if (main && main.values.some((v) => nearlySame(v, want))) r.amount = true;
+    // only call the amount WRONG when both readings agree on a different amount
+    const sureWrong = !r.amount && main && main.agreed.length && !main.agreed.some((v) => nearlySame(v, want));
+    if (sureWrong) r.wrongAmounts = [main.agreed[0] / 100];
+
     const amt = rupeesExact(ctx.total);
-    const hard = [];
-    if (r.ai) hard.push({ code: "ai", fake: true, msg: `This image is AI-generated or AI-edited (${r.ai}). Upload the real screenshot from your UPI app.` });
-    if (r.software) hard.push({ code: "edited", fake: true, msg: `This image was saved by an editing app (${r.software}). Upload the original screenshot from your UPI app.` });
-    if (r.demo) hard.push({ code: "demo", fake: true, msg: `The screenshot says "${r.demo.toUpperCase()}" — that's not a real payment.` });
-    if (r.failed && !r.success) hard.push({ code: "failed", fake: false, msg: "The screenshot shows the payment as failed or pending. Wait until it says successful." });
-    // On a tiny/resized image the text can't be read reliably, so only the size
-    // problem (and hidden AI/editing labels) are reported — not misread amounts/times.
     const readable = !r.tooSmall;
-    if (readable && !r.amount && r.wrongAmounts.length) hard.push({ code: "amount", fake: false, msg: `The screenshot shows ${rupeesExact(r.wrongAmounts[0])}, but this order needs exactly ${amt}.` });
-    if (readable && r.dateOld) hard.push({ code: "date", fake: false, msg: `The screenshot is from ${r.dateSeen}. Upload the screenshot of today's payment.` });
-    if (r.tooSmall) hard.push({ code: "small", fake: false, msg: `The image is too small (${r.w}×${r.h}) — it was resized or forwarded. Upload the original screenshot from your phone's gallery.` });
-    if (readable && r.timeOk === false) hard.push({ code: "time", fake: false, msg: `The time in the screenshot (${r.timeSeen.join(", ")}) doesn't match this order. Take a fresh screenshot right after paying.` });
+    const hard = [];
+    const add = (code, proof, msg) => hard.push({ code, proof, fake: proof, msg });
+    if (r.ai) add("ai", true, `This image is AI-generated or AI-edited (${r.ai}). Upload the real screenshot from your UPI app.`);
+    if (r.software) add("edited", true, `This image was saved by an editing app (${r.software}). Upload the original screenshot from your UPI app.`);
+    if (r.demo) add("demo", true, `The screenshot says "${r.demo.toUpperCase()}" — that's not a real payment.`);
+    if (r.utrSeen) add("utr", false, `The UTR you typed doesn't match the screenshot. The screenshot shows ${r.utrSeen}. Copy the UTR exactly from your UPI app.`);
+    if (r.failed && !r.success) add("failed", false, "The screenshot shows the payment as failed or pending. Wait until it says successful.");
+    if (readable && sureWrong) add("amount", false, `The screenshot shows ${rupeesExact(r.wrongAmounts[0])}, but this order needs exactly ${amt}.`);
+    if (readable && r.dateOld) add("date", false, `The screenshot is from ${r.dateSeen}. Upload the screenshot of today's payment.`);
+    if (r.tooSmall) add("small", false, `The image is too small (${r.w}×${r.h}) — it was resized or forwarded. Upload the original screenshot from your phone's gallery.`);
+    if (readable && r.timeOk === false) add("time", false, `The time in the screenshot (${r.timeSeen.join(", ")}) doesn't match this order. Take a fresh screenshot right after paying.`);
     const soft = [];
-    if (!r.utr) soft.push("utr");
+    if (!r.utr && !r.utrSeen) soft.push("utr");
+    if (!r.amount && !sureWrong) soft.push("amount");
     if (r.payee === false) soft.push("payee");
-    if (!r.amount && !r.wrongAmounts.length) soft.push("amount");
     return { ...r, hard, soft };
   }
 
   window.KG = {
-    payeeSeen, timeCheck, otherAmounts, inspectImage, judgeScreenshot, mainAmount, amountsInLine, nearlySame,
+    payeeSeen, timeCheck, otherAmounts, inspectImage, judgeScreenshot, utrCandidates, digitsDiff, mainAmount, amountsInLine, nearlySame,
     configured, sb, $, $$, esc, rupees, rupeesExact, rateFor, linePrice, todayIST, fmtTime, fmtDay, STATUS,
     toast, unlockAudio, audioReady, chime, askNotify, notify, flashTitle, stopFlash,
     signInWithGoogle, signOut, setupNeededHTML, loadScript, ocrImage, warmOcr, utrInText, amountInText,

@@ -418,7 +418,11 @@ function checkChips(o) {
 
   // what the student's phone found when reading the screenshot
   const s = o.student_check;
-  if (s && s.override) chips.push(`<span class="chip bad">✕ Student sent for manual check (${esc((s.missing || [s.utr === false ? "utr" : "payee"]).map((m) => ({ utr: "UTR", amount: "amount", payee: "shop name" }[m] || m)).join(", "))} not found in screenshot)</span>`);
+  if (s && s.override) {
+    const LABEL = { utr: "UTR doesn't match", amount: "amount", payee: "shop name", time: "payment time", date: "date", failed: "failed/pending", small: "small/forwarded image" };
+    chips.push(`<span class="chip bad">✕ Student sent for MANUAL CHECK — problem: ${esc((s.missing || ["utr"]).map((m) => LABEL[m] || m).join(", "))}</span>`);
+    if (s.utrSeen) chips.push(`<span class="chip bad">✕ Screenshot shows UTR ${esc(s.utrSeen)}, student typed ${esc(o.utr)}</span>`);
+  }
   else if (s && s.unavailable) chips.push(`<span class="chip meh">Student's phone couldn't read screenshot</span>`);
 
   const c = o.auto_check;
@@ -426,7 +430,10 @@ function checkChips(o) {
   if (!c || (!isChecked(o) && o.status === "payment_review")) chips.push(`<span class="chip"><span class="spinner" style="width:10px;height:10px"></span> checking screenshot…</span>`);
   else if (c.error) chips.push(`<span class="chip meh">Couldn't read screenshot</span> <button class="btn small ghost" data-act="recheck">retry</button>`);
   else {
-    chips.push(c.utr ? chip("good", "✓ UTR seen in screenshot") : chip("meh", "UTR not seen in screenshot"));
+    if (c.reusedBy) chips.push(chip("bad", `✕ Payment already used for ${esc(c.reusedBy)}`));
+    if (c.utr) chips.push(chip("good", "✓ Exact UTR seen in screenshot"));
+    else if (c.utrSeen) chips.push(chip("bad", `✕ Screenshot shows UTR ${esc(c.utrSeen)} — not ${esc(o.utr)}`));
+    else chips.push(chip("meh", "UTR not seen in screenshot"));
     if (c.amount) chips.push(chip("good", `✓ ${rupeesExact(o.total)} seen`));
     else if (c.wrongAmounts && c.wrongAmounts.length) chips.push(chip("bad", `✕ Shows ${rupeesExact(c.wrongAmounts[0])}, not ${rupeesExact(o.total)}`));
     else chips.push(chip("meh", `${rupeesExact(o.total)} not seen`));
@@ -562,21 +569,32 @@ async function runOcr() {
       const buf = await (await fetch(url)).arrayBuffer();
       const blob = new Blob([buf]);
       const [read, meta] = await Promise.all([KG.ocrImage(blob), KG.inspectImage(buf, blob)]);
-      const j = KG.judgeScreenshot(read.text, meta, { utr: o.utr, total: o.total, settings, when: o.created_at, lines: read.lines, mainDigits: read.mainDigits });
+      const j = KG.judgeScreenshot(read.text, meta, { utr: o.utr, total: o.total, settings, when: o.created_at, lines: read.lines, mainDigits: read.mainDigits, bigReads: read.bigReads });
       const result = { ...j, v: CHECK_VERSION, at: new Date().toISOString() };
 
-      // Safety net: anything with a definite problem is rejected automatically,
-      // even if it got past the student's phone (old app version, tampering…)
+      // Was any UTR in this screenshot already used by ANOTHER order? (reused payment)
+      if (j.utrCandidates && j.utrCandidates.length) {
+        const { data: others } = await sb.from("orders").select("token,utr").in("utr", j.utrCandidates.slice(0, 6)).neq("id", o.id).limit(1);
+        if (others && others.length) {
+          result.reusedBy = others[0].token;
+          j.hard.unshift({ code: "reused", proof: true, fake: true, msg: `This payment (UTR ${others[0].utr}) was already used for order ${others[0].token}.` });
+          result.hard = j.hard;
+        }
+      }
+
+      // Safety net: CERTAIN cheating is rejected automatically as FAKE.
+      // Anything less certain stays for the owner to check (shown as red flags),
+      // so an honest student is never rejected just because the reader misread.
       const latest = byId(o.id);
-      if (j.hard.length && latest && latest.status === "payment_review") {
-        const fake = j.hard.some((h) => h.fake);
+      const proof = j.hard.filter((h) => h.proof);
+      if (proof.length && latest && latest.status === "payment_review") {
         const { data: rej } = await sb.from("orders").update({
-          auto_check: result, status: "rejected", fake,
-          reject_reason: ("Auto-rejected: " + j.hard[0].msg).slice(0, 200),
+          auto_check: result, status: "rejected", fake: true,
+          reject_reason: ("Auto-rejected: " + proof[0].msg).slice(0, 200),
         }).eq("id", o.id).eq("status", "payment_review").select().maybeSingle();
         if (rej) {
           upsert(rej);
-          toast(`${o.token} auto-rejected${fake ? " as FAKE" : ""}: ${j.hard[0].msg}`, "error", 9000);
+          toast(`${o.token} auto-rejected as FAKE: ${proof[0].msg}`, "error", 9000);
           continue;
         }
       }
@@ -590,7 +608,7 @@ async function runOcr() {
   ocrBusy = false;
 }
 
-const CHECK_VERSION = 4;
+const CHECK_VERSION = 5;
 function isChecked(o) { return !!o.auto_check && (o.auto_check.error || o.auto_check.v === CHECK_VERSION); }
 
 // ---------------- storage cleanup (keeps free 1 GB from filling up) ----------------

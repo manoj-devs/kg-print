@@ -444,7 +444,7 @@ function startShotOcr(file) {
   const job = { file, text: null, lines: [], meta: null, error: null };
   job.promise = Promise.all([
     file.arrayBuffer().then((buf) => KG.inspectImage(buf, file)).then((m) => { job.meta = m; }).catch(() => { job.meta = {}; }),
-    KG.ocrImage(file).then((res) => { job.text = res.text; job.lines = res.lines; job.mainDigits = res.mainDigits; }).catch((e) => { job.error = e; console.warn("OCR failed", e); }),
+    KG.ocrImage(file).then((res) => { job.text = res.text; job.lines = res.lines; job.mainDigits = res.mainDigits; job.bigReads = res.bigReads; if (shotOcr === job) autoFillUtr(); }).catch((e) => { job.error = e; console.warn("OCR failed", e); }),
   ]).finally(() => { if (shotOcr === job) showShotStatus(); });
   shotOcr = job;
   showShotStatus();
@@ -455,7 +455,7 @@ function shotResult() {
   if (!shotOcr) return null;
   if (shotOcr.meta === null || (shotOcr.text === null && !shotOcr.error)) return { state: "reading" };
   const utr = $("#fUtr").value.trim();
-  const ctx = { utr, total: orderTotal(), settings, when: Date.now(), lines: shotOcr.lines, mainDigits: shotOcr.mainDigits };
+  const ctx = { utr, total: orderTotal(), settings, when: Date.now(), lines: shotOcr.lines, mainDigits: shotOcr.mainDigits, bigReads: shotOcr.bigReads };
   if (shotOcr.error) {
     // couldn't read the text, but the file's hidden labels still count
     const j = KG.judgeScreenshot("", shotOcr.meta, ctx);
@@ -476,17 +476,31 @@ function showShotStatus() {
   if (r.state === "reading") { box.innerHTML = `<span class="spinner"></span> Checking your screenshot…`; return; }
   if (r.hard && r.hard.length) {
     box.classList.add("bad");
-    box.innerHTML = `✕ <b>This screenshot can't be accepted.</b><br>${r.hard.map((h) => esc(h.msg)).join("<br>")}`;
-    $("#overrideBox").hidden = true;
-    $("#fOverride").checked = false;
+    const proof = r.hard.some((h) => h.proof);
+    box.innerHTML = `✕ <b>This screenshot can't be accepted.</b><br>${r.hard.map((h) => esc(h.msg)).join("<br>")}`
+      + (r.utrSeen ? `<br><button type="button" class="btn small" id="useSeenUtr" style="margin-top:6px">Use ${esc(r.utrSeen)}</button>` : "");
+    if (proof) { $("#overrideBox").hidden = true; $("#fOverride").checked = false; }
+    const useBtn = $("#useSeenUtr");
+    if (useBtn) useBtn.onclick = () => { $("#fUtr").value = r.utrSeen; showShotStatus(); };
     return;
   }
   if (r.state === "unavailable") { box.classList.add("meh"); box.textContent = "Couldn't read the screenshot automatically — the owner will check it."; return; }
   if (!r.utrTyped) { box.textContent = "✓ Screenshot looks fine. Now type the 12-digit UTR from it."; return; }
   if (r.utr && r.amount) { box.classList.add("good"); box.textContent = `✓ UTR and ${rupeesExact(orderTotal())} found in your screenshot`; return; }
-  if (r.utr) { box.classList.add("bad"); box.textContent = `✓ UTR found · ✕ couldn't find ${rupeesExact(orderTotal())} in the screenshot — pay EXACTLY this amount and upload the screenshot that shows it`; return; }
-  box.classList.add("bad");
-  box.textContent = "✕ This UTR is not in your screenshot. Check the number, or upload the screenshot that shows it.";
+  box.classList.add("meh");
+  box.textContent = !r.utr
+    ? "⚠ Couldn't find this exact UTR in your screenshot. Check every digit, or upload the screenshot that shows it."
+    : `⚠ UTR found, but couldn't read ${rupeesExact(orderTotal())} clearly. Make sure you paid EXACTLY this amount.`;
+}
+
+// Fill the UTR from the screenshot when the student hasn't typed one yet.
+function autoFillUtr() {
+  if (!shotOcr || !shotOcr.text) return;
+  const c = KG.utrCandidates(shotOcr.text);
+  if (c.length && !$("#fUtr").value.trim()) {
+    $("#fUtr").value = c[0];
+    toast("UTR filled in from your screenshot — check it matches your UPI app.", "ok", 5000);
+  }
 }
 
 // ---------------- submit ----------------
@@ -549,29 +563,34 @@ async function submitOrder(e) {
     await shotOcr.promise;
     const r = shotResult();
     let studentCheck;
-    // definite problems (AI image, edited, TEST/DEMO, wrong amount, old date/time, failed) — never allowed
-    if (r.hard && r.hard.length) {
-      return fail("This screenshot can't be accepted: " + r.hard[0].msg, "#fShot");
+    // 1. certain cheating — never accepted
+    const proof = (r.hard || []).filter((h) => h.proof);
+    if (proof.length) return fail("This screenshot can't be accepted: " + proof[0].msg, "#fShot");
+
+    // 2. a UTR in this screenshot was already used for another order → reused payment
+    setBusy("Checking payment details…");
+    for (const c of (r.utrCandidates || []).slice(0, 4)) {
+      const { data: used } = await sb.rpc("check_payment", { p_utr: c, p_sha: "0".repeat(64) });
+      if (used === "utr") return fail(`This payment (UTR ${c}) was already used for another order. Each payment can be used only once.`, "#fShot");
     }
+
+    // 3. things that look wrong or couldn't be confirmed — retry first; after 2 tries
+    //    the student may send it to the owner for a manual check (marked in red)
+    const problems = [...(r.hard || []).map((h) => h.code), ...(r.soft || [])];
     if (r.state === "unavailable") {
       studentCheck = { unavailable: true, why: String((shotOcr.error && (shotOcr.error.message || shotOcr.error)) || "").slice(0, 120) };
     } else {
-      // things we couldn't confirm — retry first, manual check allowed after 2 tries
-      const missing = [];
-      if (!r.utr) missing.push("utr");
-      if (!r.amount) missing.push("amount");
-      if (r.payee === false) missing.push("payee");
-      if (missing.length && !$("#fOverride").checked) {
+      if (problems.length && !$("#fOverride").checked) {
         ocrFails++;
         if (ocrFails >= 2) $("#overrideBox").hidden = false;
-        const what = missing.includes("utr")
-          ? "This UTR is not in your screenshot. Check the 12 digits, or upload the screenshot that shows the UTR."
-          : missing.includes("amount")
-            ? `Couldn't find ${rupeesExact(orderTotal())} in your screenshot. Pay EXACTLY ${rupeesExact(orderTotal())} and upload the screenshot that shows it clearly.`
-            : `The screenshot doesn't show payment to ${settings.payee_name} (${settings.upi_id}). Make sure you paid the shop.`;
-        return fail(ocrFails >= 2 ? what + " If it's correct, tick the box below." : what, missing.includes("utr") ? "#fUtr" : "#fShot");
+        const first = (r.hard || [])[0];
+        const what = first ? first.msg
+          : problems.includes("utr") ? "This exact UTR is not in your screenshot. Check every digit, or upload the screenshot that shows the UTR."
+          : problems.includes("amount") ? `Couldn't read ${rupeesExact(orderTotal())} in your screenshot. Pay EXACTLY ${rupeesExact(orderTotal())} and upload the original screenshot (not from WhatsApp).`
+          : `The screenshot doesn't show payment to ${settings.payee_name}. Make sure you paid the shop.`;
+        return fail(ocrFails >= 2 ? what + " If your payment is correct, tick the box below to send it to the shop owner." : what, problems.includes("utr") ? "#fUtr" : "#fShot");
       }
-      studentCheck = { utr: r.utr, amount: r.amount, payee: r.payee, override: missing.length > 0, missing };
+      studentCheck = { utr: r.utr, amount: r.amount, payee: r.payee, override: problems.length > 0, missing: problems, utrSeen: r.utrSeen || null };
     }
 
     setBusy("Checking payment details…");
