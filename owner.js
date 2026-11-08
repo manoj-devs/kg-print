@@ -160,12 +160,96 @@ function renderOpen() {
   $("#openLabel").textContent = settings.shop_open ? "Open" : "Closed";
   $("#upiWarn").hidden = !!settings.upi_id && settings.upi_id !== "owner@upi";
 }
+// ---------------- auto-verify payments (bank alerts) ----------------
+let creditToken = null;
+async function loadAutoVerify() {
+  const box = $("#avBody");
+  const { data, error } = await sb.rpc("get_credit_token");
+  if (error || !data) {
+    box.innerHTML = `<p class="hint">Not set up yet — run <b>supabase/update-4.sql</b> in Supabase (SQL Editor), then open Settings again.</p>`;
+    return;
+  }
+  creditToken = data;
+  const cfg = window.KG_CONFIG;
+  const url = cfg.SUPABASE_URL.replace(/\/$/, "") + "/rest/v1/rpc/bank_credit";
+  box.innerHTML = `
+    <p class="hint" style="margin-top:0">When the bank alert for a payment arrives ("INR 4.75 CREDITED … UPI Ref …"), it's sent here and the matching order is <b>accepted automatically</b>.</p>
+    <div class="row" style="gap:6px;margin-bottom:8px">
+      <button type="button" class="btn small primary" id="avCopyScript">📋 Copy Gmail script</button>
+      <button type="button" class="btn small" id="avCopyUrl">Copy link</button>
+      <button type="button" class="btn small" id="avCopyKey">Copy secret key</button>
+    </div>
+    <label class="field"><span>Test: paste a bank message</span>
+      <textarea id="avTestText" placeholder="e.g. An amount of INR 4.75 has been CREDITED to your account XXX556 with UPI Ref No.:219998102253"></textarea></label>
+    <div class="row" style="justify-content:space-between"><button type="button" class="btn small" id="avTest">Test it</button><small id="avTestResult" class="muted"></small></div>
+    <h4 style="margin:12px 0 6px">Recent bank alerts</h4>
+    <div id="avRecent" class="blocked-list"><small class="muted">Loading…</small></div>`;
+  $("#avCopyUrl").onclick = () => copyText(url, "Link copied");
+  $("#avCopyKey").onclick = () => copyText(creditToken, "Secret key copied");
+  $("#avCopyScript").onclick = () => copyText(gmailScript(url, cfg.SUPABASE_ANON_KEY, creditToken), "Gmail script copied — paste it in script.google.com");
+  $("#avTest").onclick = async () => {
+    const text = $("#avTestText").value.trim();
+    if (!text) return;
+    const { data: r, error: e } = await sb.rpc("bank_credit", { p_token: creditToken, p_text: text, p_source: "test" });
+    $("#avTestResult").textContent = e ? "Error: " + e.message : r;
+    loadRecentCredits();
+  };
+  loadRecentCredits();
+}
+async function loadRecentCredits() {
+  const { data } = await sb.from("bank_credits").select("*").order("received_at", { ascending: false }).limit(8);
+  const tokenOf = (id) => (orders.find((o) => o.id === id) || {}).token;
+  $("#avRecent").innerHTML = (data || []).length ? data.map((c) => `<div class="blocked-row"><div><b>${rupeesExact(c.amount)}</b> · ${c.utr ? "UTR " + esc(c.utr) : "no UTR"} · ${esc(c.source || "")}<br>
+      <small class="muted">${new Date(c.received_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })} · ${c.matched_order ? "matched " + esc(tokenOf(c.matched_order) || "order") : "not matched"}</small></div></div>`).join("")
+    : `<small class="muted">No bank alerts received yet.</small>`;
+}
+async function copyText(t, msg) {
+  try { await navigator.clipboard.writeText(t); toast(msg, "ok", 3000); }
+  catch (e) { prompt("Copy this:", t); }
+}
+function gmailScript(url, key, token) {
+  return `// KG Print — send bank "CREDITED" emails to the shop website (runs every minute)
+// 1) script.google.com → New project → paste this → Save
+// 2) Run "setup" once → Allow access to Gmail
+const URL = ${JSON.stringify(url)};
+const KEY = ${JSON.stringify(key)};
+const SECRET = ${JSON.stringify(token)};
+// which emails to read: bank credit alerts from the last day
+const SEARCH = 'newer_than:1d (credited OR "has been credited" OR received) -label:kgprint-done';
+
+function checkBankMails() {
+  const done = GmailApp.getUserLabelByName('kgprint-done') || GmailApp.createLabel('kgprint-done');
+  const threads = GmailApp.search(SEARCH, 0, 20);
+  for (const t of threads) {
+    for (const m of t.getMessages()) {
+      const text = (m.getSubject() + ' ' + m.getPlainBody()).replace(/\\s+/g, ' ').slice(0, 2500);
+      if (!/credited|received/i.test(text)) continue;
+      const res = UrlFetchApp.fetch(URL, {
+        method: 'post', contentType: 'application/json', muteHttpExceptions: true,
+        headers: { apikey: KEY },
+        payload: JSON.stringify({ p_token: SECRET, p_text: text, p_source: 'gmail' }),
+      });
+      console.log(res.getContentText());
+    }
+    t.addLabel(done);
+  }
+}
+
+function setup() {
+  ScriptApp.getProjectTriggers().forEach((tr) => ScriptApp.deleteTrigger(tr));
+  ScriptApp.newTrigger('checkBankMails').timeBased().everyMinutes(1).create();
+  checkBankMails();
+}
+`;
+}
+
 function openSettings() {
   const f = $("#settingsForm");
   ["shop_name", "upi_id", "payee_name", "bw_single", "bw_double", "color_single", "color_double", "notice"].forEach((k) => (f.elements[k].value = settings[k] ?? ""));
 
   $("#settingsModal").hidden = false;
   loadBlocked();
+  loadAutoVerify();
 }
 
 // ---------------- blocked students ----------------
@@ -462,10 +546,18 @@ function subscribe() {
     .on("postgres_changes", { event: "*", schema: "public", table: "orders" }, (p) => {
       if (p.eventType === "DELETE") { orders = orders.filter((o) => o.id !== p.old.id); render(); return; }
       const o = p.new;
+      const prev = byId(o.id);
       const isNew = !knownIds.has(o.id);
       knownIds.add(o.id);
       upsert(o);
       if (isNew && p.eventType === "INSERT") { alertNew(o); flashCard(o.id); }
+      const bankNow = o.bank_verified && o.status === "queued" && (isNew || (prev && !prev.bank_verified));
+      if (bankNow) {
+        KG.chime(2);
+        toast(`🏦 ${o.token} AUTO-ACCEPTED — bank confirmed ${rupeesExact(o.total)}. Ready to print.`, "ok", 10000);
+        KG.notify(`${o.token} paid ✅ (bank confirmed)`, `${o.student_name} · ${rupeesExact(o.total)} · ready to print`);
+        flashCard(o.id);
+      }
     })
     .subscribe((status) => {
       const dot = $("#liveDot");
@@ -546,7 +638,7 @@ function cardHTML(o) {
       <div class="who">
         <b>${esc(o.student_name)}</b><br>
         <small>Flat <b>${esc(o.flat)}</b> · <a href="tel:${esc(o.phone)}">${esc(o.phone)}</a></small><br>
-        <span class="badge st-${o.status}">${STATUS[o.status]}</span>${o.fake ? `<span class="badge fake">FAKE</span>` : ""}
+        <span class="badge st-${o.status}">${STATUS[o.status]}</span>${o.fake ? `<span class="badge fake">FAKE</span>` : ""}${o.bank_verified ? `<span class="badge bank" title="${esc(o.bank_note || "")}">🏦 Bank confirmed</span>` : ""}
       </div>
       <div class="amt">${rupeesExact(o.total)}<br><small class="muted" style="font:400 12px Inter">${pages} pages</small></div>
     </div>
@@ -588,6 +680,7 @@ function checkChips(o) {
   if (twin) chips.push(`<span class="chip meh">⚠ Same amount as ${esc(twin.token)} — match by UTR too</span>`);
 
   // what the student's phone found when reading the screenshot
+  if (o.bank_note && !o.bank_verified) chips.unshift(`<span class="chip bad">🏦 ${esc(o.bank_note)}</span>`);
   const s = o.student_check;
   if (s && s.override) {
     const LABEL = { utr: "UTR doesn't match", amount: "amount", payee: "shop name", time: "payment time", date: "date", failed: "failed/pending", small: "small/forwarded image" };
