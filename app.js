@@ -55,6 +55,90 @@ function checkPaiseNotReused() {
 }
 function resetPaise() { memPaise = null; try { localStorage.removeItem("kg_paise"); } catch (e) { /* ignore */ } }
 
+// ================= unfinished order: saved on this phone =================
+// Kept in the browser's own storage (IndexedDB), so a refresh — or the phone
+// closing the browser while the student pays in Paytm — doesn't lose anything.
+const DRAFT_KEY = "current";
+function draftDb() {
+  return new Promise((res, rej) => {
+    try {
+      const r = indexedDB.open("kgprint", 1);
+      r.onupgradeneeded = () => r.result.createObjectStore("draft");
+      r.onsuccess = () => res(r.result);
+      r.onerror = () => rej(r.error);
+    } catch (e) { rej(e); }
+  });
+}
+async function draftOp(mode, fn) {
+  const db = await draftDb();
+  return new Promise((res, rej) => {
+    const tx = db.transaction("draft", mode);
+    const req = fn(tx.objectStore("draft"));
+    tx.oncomplete = () => { res(req && req.result); db.close(); };
+    tx.onerror = () => { rej(tx.error); db.close(); };
+  });
+}
+let draftTimer = null, restoring = false;
+function saveDraft() {
+  if (restoring || !user) return;
+  clearTimeout(draftTimer);
+  draftTimer = setTimeout(async () => {
+    try {
+      if (!items.length && !shotFile && !$("#fUtr").value && !$("#fNotes").value) return clearDraft();
+      const d = {
+        user: user.id, savedAt: Date.now(),
+        items: items.filter((i) => !i.loading).map((i) => ({
+          id: i.id, file: i.file, name: i.name, kind: i.kind, pages: i.pages, total: i.total,
+          range: i.range, rangeMode: i.rangeMode, pagesSource: i.pagesSource,
+          copies: i.copies, color: i.color, double: i.double,
+        })),
+        shot: shotFile || null,
+        utr: $("#fUtr").value, utrAuto: $("#fUtr").dataset.auto || "0",
+        notes: $("#fNotes").value,
+        payingSince, qrSaved,
+      };
+      await draftOp("readwrite", (st) => st.put(d, DRAFT_KEY));
+    } catch (e) { /* storage blocked/full — the page still works */ }
+  }, 400);
+}
+async function clearDraft() {
+  clearTimeout(draftTimer);
+  try { await draftOp("readwrite", (st) => st.delete(DRAFT_KEY)); } catch (e) { /* ignore */ }
+}
+async function restoreDraft() {
+  let d = null;
+  try { d = await draftOp("readonly", (st) => st.get(DRAFT_KEY)); } catch (e) { return; }
+  if (!d || d.user !== user.id || Date.now() - d.savedAt > 2 * 864e5) { if (d) clearDraft(); return; }
+  if (items.length || shotFile) return; // already working on something
+  restoring = true;
+  try {
+    items = (d.items || []).filter((x) => x.file).map((x) => ({ ...x, loading: false, rangeErr: "" }));
+    items.forEach(applyRange);
+    renderItems();
+    $("#fNotes").value = d.notes || "";
+    $("#fUtr").value = d.utr || "";
+    $("#fUtr").dataset.auto = d.utrAuto || "0";
+    payingSince = d.payingSince || 0;
+    qrSaved = !!d.qrSaved;
+    if (qrSaved) { $("#qrSavedNote").innerHTML = "✓ QR saved to your phone. Now open your UPI app (step 2)."; $("#qrSavedNote").classList.add("qr-saved"); }
+    if (d.shot) {
+      shotFile = d.shot;
+      const img = $("#shotPreview");
+      img.src = URL.createObjectURL(d.shot);
+      img.hidden = false;
+      $("#utrHint").textContent = "Screenshot restored — checking it again…";
+      startShotOcr(d.shot);
+    }
+    if (items.length || d.shot) {
+      toast("Restored your unfinished order ✓", "ok", 4000);
+      // they had gone to pay → take them to the last step
+      if (payingSince && Date.now() - payingSince < 30 * 60000) { leftForPayment = true; setTimeout(welcomeBack, 400); }
+    }
+  } finally {
+    restoring = false;
+  }
+}
+
 init();
 
 async function init() {
@@ -119,7 +203,7 @@ function render() {
       ${meta.avatar_url ? `<img src="${esc(meta.avatar_url)}" alt="" referrerpolicy="no-referrer">` : ""}
       <span class="name">${esc(meta.full_name || user.email)}</span>
       <button class="btn small" id="logoutBtn">Logout</button></div>`;
-  $("#logoutBtn").onclick = KG.signOut;
+  $("#logoutBtn").onclick = async () => { await clearDraft(); KG.signOut(); };
 
   // prefill details (remembered on this device)
   const saved = JSON.parse(localStorageGet("kg_details") || "{}");
@@ -129,6 +213,7 @@ function render() {
 
   checkBlocked();
   loadMyOrders();
+  restoreDraft();
 }
 
 async function checkBlocked() {
@@ -165,6 +250,7 @@ function wireStaticEvents() {
     e.target.dataset.auto = "0"; // the student typed it themselves
     e.target.value = e.target.value.replace(/\D/g, "").slice(0, 12);
     showShotStatus();
+    saveDraft();
   });
   $("#fShot").onchange = async (e) => {
     const picked = e.target.files[0];
@@ -178,6 +264,7 @@ function wireStaticEvents() {
     try { f = await keepInMemory(picked); }
     catch (err) { e.target.value = ""; img.hidden = true; shotOcr = null; showShotStatus(); return toast("Couldn't read that screenshot. Please select it again.", "error", 6000); }
     shotFile = f;
+    saveDraft();
     img.src = URL.createObjectURL(f);
     img.hidden = false;
     startShotOcr(f);
@@ -208,6 +295,7 @@ function wireStaticEvents() {
   });
   window.addEventListener("focus", () => { if (leftForPayment) welcomeBack(); });
   $("#orderForm").onsubmit = submitOrder;
+  $("#fNotes").addEventListener("input", saveDraft);
 
   $("#successClose").onclick = () => { $("#successModal").hidden = true; showTab("orders"); };
   $("#notifyBtn").onclick = async () => {
@@ -405,6 +493,7 @@ function orderTotal() {
 }
 
 function updateTotals() {
+  saveDraft();
   if (!settings) return;
   $$("#fileList .file").forEach((row) => {
     const it = items.find((i) => i.id === row.dataset.id);
@@ -503,7 +592,7 @@ function openUpiApp(key) {
 // ---------------- leaving to pay → coming back ----------------
 var payingSince = 0;        // when the student started paying (tapped pay / copied)
 var leftForPayment = false; // the page went to the background after that
-function startPaying() { payingSince = Date.now(); leftForPayment = false; }
+function startPaying() { payingSince = Date.now(); leftForPayment = false; saveDraft(); }
 function welcomeBack() {
   leftForPayment = false;
   if (!payingSince || Date.now() - payingSince > 30 * 60000) return; // only within 30 min
@@ -614,6 +703,7 @@ function autoFillUtr() {
     box.value = c[0];
     box.dataset.auto = "1";
     hint.innerHTML = "✓ Filled from your screenshot — check it matches your UPI app.";
+    saveDraft();
     hint.classList.add("qr-saved");
     showShotStatus();
   }
@@ -778,6 +868,7 @@ function friendlyError(err) {
 
 function onOrderPlaced(order) {
   resetPaise();
+  clearDraft();
   payingSince = 0; leftForPayment = false;
   qrSaved = false;
   $("#qrSavedNote").innerHTML = 'If your browser asks "Download?", tap <b>Download</b>.';
