@@ -91,11 +91,21 @@ function applySettings(s) {
   settings = s;
   $("#shopName").textContent = s.shop_name;
   document.title = s.shop_name + " — Skip the xerox queue";
-  $("#closedBanner").hidden = s.shop_open;
   $("#notice").hidden = !s.notice;
   $("#notice").textContent = s.notice || "";
-  $("#submitBtn").disabled = !s.shop_open || blocked;
+  showOpenState();
   renderItems();
+}
+// open / closed banner
+function showOpenState() {
+  if (!settings) return;
+  const st = KG.shopState(settings);
+  const b = $("#closedBanner");
+  b.hidden = st.open;
+  if (!st.open) {
+    b.innerHTML = `<b>Shop is closed right now.</b> You can't place new orders until the owner opens it.`;
+  }
+  $("#submitBtn").disabled = !st.open || blocked;
 }
 
 // ---------------- auth / layout ----------------
@@ -125,7 +135,7 @@ async function checkBlocked() {
   const { data } = await sb.from("blocked_users").select("user_id").eq("user_id", user.id).maybeSingle();
   blocked = !!data;
   $("#blockedBanner").hidden = !blocked;
-  $("#submitBtn").disabled = blocked || !(settings && settings.shop_open);
+  $("#submitBtn").disabled = blocked || !KG.shopState(settings).open;
 }
 
 function localStorageGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
@@ -637,7 +647,8 @@ function fail(msg, focusSel) {
 
 async function submitOrder(e) {
   e.preventDefault();
-  if (!settings.shop_open) return fail("Shop is closed right now.");
+  const st = KG.shopState(settings);
+  if (!st.open) return fail("Shop is closed right now.");
 
   const name = $("#fName").value.trim();
   const phone = $("#fPhone").value.trim();
@@ -758,7 +769,7 @@ function friendlyError(err) {
   if (/orders_shot_unique/.test(msg)) return "This screenshot was already uploaded before.";
   if (/blocked/i.test(msg)) { blocked = true; $("#blockedBanner").hidden = false; return "Your account is blocked because of fake payments. Please talk to the shop owner."; }
   if (/Invalid payment amount/i.test(msg)) return "Something changed with the amount. Refresh the page and try again.";
-  if (/closed/i.test(msg)) return "Shop is closed right now.";
+  if (/closed/i.test(msg)) return msg.replace(/^.*?(Shop is closed)/, "$1");
   if (/JWT|not authenticated|sign in/i.test(msg)) return "Your login expired. Please log out and sign in again.";
   if (/exceeded|too large|maximum allowed size/i.test(msg)) return "A file is too large. Max 25 MB per file.";
   if (/Failed to fetch|NetworkError/i.test(msg)) return "No internet connection. Please try again.";

@@ -239,3 +239,4 @@ code { background: #f1efe8; padding: 1px 5px; border-radius: 5px; font-size: 13p
 .qpos { display: inline-block; font-size: 12px; font-weight: 700; color: var(--primary); background: var(--primary-soft); border-radius: 99px; padding: 2px 9px; margin-left: 6px; }
 .adjust { margin: 8px 0 0; padding: 8px 10px; border-radius: 10px; font-size: 13px; background: var(--warn-soft); color: #5c3500; border: 1px solid #f3d9a4; }
 .adjust.refund { background: var(--ok-soft); color: #0d4d26; border-color: #bfe3c9; }
+

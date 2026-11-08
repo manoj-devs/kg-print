@@ -614,7 +614,14 @@
     return { ...r, hard, soft };
   }
 
+  // open = the owner's Open/Closed switch
+  function shopState(s) {
+    if (!s) return { open: false, reason: "loading" };
+    return s.shop_open ? { open: true } : { open: false, reason: "off" };
+  }
+
   window.KG = {
+    shopState,
     payeeSeen, timeCheck, otherAmounts, inspectImage, judgeScreenshot, utrCandidates, digitsDiff, mainAmount, amountsInLine, nearlySame,
     configured, sb, $, $$, esc, rupees, rupeesExact, rateFor, linePrice, todayIST, fmtTime, fmtDay, STATUS,
     toast, unlockAudio, audioReady, chime, askNotify, notify, flashTitle, stopFlash,

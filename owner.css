@@ -77,3 +77,14 @@
 .adj-row input { width: 90px; flex: none; }
 .adj-sum { background: #f7f6f2; border-radius: 10px; padding: 10px 12px; font-size: 14px; line-height: 1.6; }
 .warn-t { color: var(--warn); font-weight: 700; } .ok-t { color: var(--ok); font-weight: 700; }
+
+.sum-box { max-width: 640px; }
+.sum-box input[type=date] { width: auto; min-height: 36px; padding: 4px 8px; }
+.sum-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+@media (max-width: 520px) { .sum-grid { grid-template-columns: repeat(2, 1fr); } }
+.sum-tile { background: #f7f6f2; border-radius: 10px; padding: 10px 12px; }
+.sum-tile small { display: block; color: var(--muted); font-size: 12px; }
+.sum-tile b { font: 700 22px "Space Grotesk", sans-serif; }
+.sum-tile.big { grid-column: 1 / -1; background: var(--ok-soft); }
+.sum-tile.big b { font-size: 30px; color: var(--ok); }
+.sum-note { font-size: 12px; color: var(--muted); margin-top: 10px; }

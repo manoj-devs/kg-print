@@ -70,6 +70,11 @@ function wireEvents() {
   };
 
   $("#settingsBtn").onclick = openSettings;
+  $("#summaryBtn").onclick = () => openSummary("today");
+  $("#sumClose").onclick = () => ($("#summaryModal").hidden = true);
+  $("#sumExport").onclick = exportCsv;
+  $$("#summaryModal [data-range]").forEach((b) => (b.onclick = () => openSummary(b.dataset.range)));
+  $("#sumFrom").onchange = $("#sumTo").onchange = () => loadSummary();
   $("#settingsCancel").onclick = () => ($("#settingsModal").hidden = true);
   $("#settingsForm").onsubmit = saveSettings;
   $("#cleanupBtn").onclick = () => cleanup(true);
@@ -158,6 +163,7 @@ function renderOpen() {
 function openSettings() {
   const f = $("#settingsForm");
   ["shop_name", "upi_id", "payee_name", "bw_single", "bw_double", "color_single", "color_double", "notice"].forEach((k) => (f.elements[k].value = settings[k] ?? ""));
+
   $("#settingsModal").hidden = false;
   loadBlocked();
 }
@@ -262,6 +268,89 @@ function openAllDocs(o) {
   loadDocWindows(o, openDocWindows(o));
 }
 
+// ---------------- daily summary + Excel export ----------------
+let sumRows = [];
+function istDate(offsetDays = 0) {
+  const d = new Date(Date.now() + offsetDays * DAY);
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(d);
+}
+function openSummary(range) {
+  const today = istDate(0);
+  let from = today, to = today;
+  if (range === "yesterday") from = to = istDate(-1);
+  if (range === "week") from = istDate(-6);
+  if (range === "month") from = today.slice(0, 8) + "01";
+  $("#sumFrom").value = from;
+  $("#sumTo").value = to;
+  $("#summaryModal").hidden = false;
+  loadSummary();
+}
+const paidAmount = (o) => Number(o.adjusted_total ?? o.total);
+async function loadSummary() {
+  const from = $("#sumFrom").value, to = $("#sumTo").value;
+  if (!from || !to) return;
+  $("#sumBody").innerHTML = `<div class="empty"><span class="spinner"></span> Loading…</div>`;
+  const { data, error } = await sb.from("orders").select("*").gte("token_day", from).lte("token_day", to)
+    .order("token_day", { ascending: true }).order("token_no", { ascending: true }).limit(5000);
+  if (error) { $("#sumBody").innerHTML = `<div class="empty">${esc(error.message)}</div>`; return; }
+  sumRows = data;
+  const accepted = data.filter((o) => ["queued", "ready", "collected"].includes(o.status));
+  const waiting = data.filter((o) => o.status === "payment_review").length;
+  const rejected = data.filter((o) => o.status === "rejected");
+  const money = accepted.reduce((t, o) => t + paidAmount(o), 0);
+  const extra = accepted.reduce((t, o) => t + (o.adjusted_total != null ? Number(o.adjusted_total) - Number(o.total) : 0), 0);
+  let bw = 0, colour = 0, sheets = 0, files = 0;
+  for (const o of accepted) for (const f of o.files) {
+    const printed = f.pages * f.copies;
+    if (f.color) colour += printed; else bw += printed;
+    sheets += (f.double ? Math.ceil(f.pages / 2) : f.pages) * f.copies;
+    files++;
+  }
+  const label = from === to ? (from === istDate(0) ? "Today" : from) : `${from} → ${to}`;
+  $("#sumBody").innerHTML = `
+    <div class="sum-grid">
+      <div class="sum-tile big"><small>Money collected · ${esc(label)}</small><b>${rupeesExact(money)}</b>
+        ${extra ? `<small>includes ${extra > 0 ? "+" : "−"}${rupeesExact(Math.abs(extra))} from page corrections (collect/give back at counter)</small>` : ""}</div>
+      <div class="sum-tile"><small>Orders accepted</small><b>${accepted.length}</b></div>
+      <div class="sum-tile"><small>Waiting to verify</small><b>${waiting}</b></div>
+      <div class="sum-tile"><small>Rejected</small><b>${rejected.length}</b>${rejected.some((o) => o.fake) ? `<small>${rejected.filter((o) => o.fake).length} fake</small>` : ""}</div>
+      <div class="sum-tile"><small>B/W pages printed</small><b>${bw}</b></div>
+      <div class="sum-tile"><small>Colour pages printed</small><b>${colour}</b></div>
+      <div class="sum-tile"><small>Paper sheets used</small><b>${sheets}</b><small>${files} file(s)</small></div>
+    </div>
+    <p class="sum-note">Counts accepted orders only (accepted, ready or collected). The Excel file lists every order in this period with all details.</p>`;
+}
+function csvCell(v) {
+  const s = v == null ? "" : String(v);
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+function exportCsv() {
+  if (!sumRows.length) return toast("No orders in this period", "warn");
+  const head = ["Date", "Token", "Time", "Student", "Flat", "Phone", "Email", "Status", "Files", "B/W pages", "Colour pages", "Paid (Rs)", "Corrected total (Rs)", "Extra(+)/Refund(-) (Rs)", "Final amount (Rs)", "UTR", "Notes", "Reject reason"];
+  const lines = [head.map(csvCell).join(",")];
+  for (const o of sumRows) {
+    let bw = 0, colour = 0;
+    const fileText = o.files.map((f) => {
+      if (f.color) colour += f.pages * f.copies; else bw += f.pages * f.copies;
+      return `${f.name} (${f.range ? `pages ${f.range}, ` : ""}${f.pages}p x${f.copies}, ${f.color ? "colour" : "B/W"}, ${f.double ? "2-side" : "1-side"})`;
+    }).join(" | ");
+    const diff = o.adjusted_total != null ? Math.round((Number(o.adjusted_total) - Number(o.total)) * 100) / 100 : "";
+    lines.push([
+      o.token_day, o.token, fmtTime(o.created_at), o.student_name, o.flat, o.phone, o.email, STATUS[o.status] || o.status,
+      fileText, bw, colour, Number(o.total).toFixed(2), o.adjusted_total != null ? Number(o.adjusted_total).toFixed(2) : "",
+      diff === "" ? "" : diff.toFixed(2), paidAmount(o).toFixed(2), `'${o.utr}`, o.notes || "", o.reject_reason || "",
+    ].map(csvCell).join(","));
+  }
+  const blob = new Blob(["\ufeff" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
+  const a = document.createElement("a");
+  const from = $("#sumFrom").value, to = $("#sumTo").value;
+  a.href = URL.createObjectURL(blob);
+  a.download = `kg-print_${from === to ? from : from + "_to_" + to}.csv`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+  toast("Excel file downloaded", "ok");
+}
+
 // ---------------- adjust pages (e.g. wrong Word page count) ----------------
 function adjustInfo(o) {
   if (o.adjusted_total == null) return "";
@@ -342,6 +431,7 @@ async function saveSettings(e) {
     color_single: +f.color_single.value, color_double: +f.color_double.value,
     notice: f.notice.value.trim(),
   };
+
   const { data, error } = await sb.from("settings").update(patch).eq("id", 1).select().single();
   if (error) { toast(error.message, "error"); return; }
   settings = data;
@@ -407,7 +497,7 @@ function render() {
   $("#stReady").textContent = ready;
   const todays = orders.filter((o) => o.token_day === today);
   $("#stToday").textContent = todays.length;
-  $("#stMoney").textContent = rupees(todays.filter((o) => ["queued", "ready", "collected"].includes(o.status)).reduce((s, o) => s + Number(o.total), 0));
+  $("#stMoney").textContent = rupeesExact(todays.filter((o) => ["queued", "ready", "collected"].includes(o.status)).reduce((s, o) => s + Number(o.adjusted_total ?? o.total), 0));
   $$(".tabs button").forEach((b) => b.classList.toggle("active", b.dataset.tab === tab));
 
   let list = tab === "done"
