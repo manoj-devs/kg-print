@@ -319,7 +319,281 @@
         try { const t = await bigNumberAt(source, width); if (t) bigReads.push(t); } catch (e) { /* ignore */ }
       }
     }
-    return { text, lines: lines.map(({ text, h, y }) => ({ text, h, y })), mainDigits, bigReads };
+    // pixel checks (edited spots, odd digits) + the phone clock in the status bar
+    let forensic = null, statusTime = null;
+    if (source instanceof Blob && img instanceof HTMLCanvasElement) {
+      try { forensic = await forensicCheck(source, img, data, lines); } catch (e) { console.warn("forensic check failed", e); }
+      try { statusTime = await readStatusBar(source); } catch (e) { /* ignore */ }
+    }
+    return { text, lines: lines.map(({ text, h, y }) => ({ text, h, y })), mainDigits, bigReads, forensic, statusTime };
+  }
+
+  // ================= pixel forensics =================
+  // A real screenshot is drawn by the phone: flat/smooth backgrounds and every digit
+  // in one number drawn with the same font, size, colour and baseline. When someone
+  // changes the amount or UTR in an editor, it usually leaves:
+  //   • a faint rectangle (patch) whose colour is slightly different from the background
+  //   • a digit that is a bit taller/shorter, sits higher/lower, or has a different colour
+  // These checks look ONLY around the amount, the UTR and the date/time lines.
+  async function forensicCheck(blob, img, data, lines) {
+    const bmp = await createImageBitmap(blob);
+    const c = document.createElement("canvas");
+    c.width = img.width; c.height = img.height;
+    const g = c.getContext("2d", { willReadFrequently: true });
+    g.imageSmoothingQuality = "high";
+    g.drawImage(bmp, 0, 0, c.width, c.height);
+    const origW = bmp.width;
+    bmp.close && bmp.close();
+    const W = c.width, H = c.height;
+    const px = g.getImageData(0, 0, W, H).data;
+    const scale = W / origW;
+    const L = (x, y) => { const i = (y * W + x) * 4; return 0.299 * px[i] + 0.587 * px[i + 1] + 0.114 * px[i + 2]; };
+    const RGB = (x, y) => { const i = (y * W + x) * 4; return [px[i], px[i + 1], px[i + 2]]; };
+
+    // which lines to inspect: the biggest amount, any line with a 12-digit number, any line with a time
+    const all = (data.lines || []).filter((l) => l.bbox);
+    const targets = [];
+    const main = pickMainLine(lines);
+    if (main && main.bbox) targets.push({ what: "amount", bbox: main.bbox });
+    // also the tallest line of text in the top half (= the big amount), found from the
+    // pixels themselves — an edited amount is sometimes not read by OCR at all
+    const band = tallestBand();
+    if (band && !(main && main.bbox && Math.abs(main.bbox.y0 - band.y0) < band.y1 - band.y0)) targets.push({ what: "amount", bbox: band });
+    for (const l of all) {
+      const t = numberish(l.text || "");
+      if (/(?<!\d)\d{12}(?!\d)/.test(t)) targets.push({ what: "UTR", bbox: l.bbox });
+      else if (/\b([01]?\d|2[0-3]):[0-5]\d\b/.test(l.text || "") && l.bbox.y0 > H * 0.06) targets.push({ what: "date/time", bbox: l.bbox });
+    }
+    const patches = [];
+    for (const t of targets.slice(0, 6)) {
+      const hit = patchAround(t.bbox);
+      if (hit) patches.push({ what: t.what, ...hit });
+    }
+
+    // digit consistency inside the UTR number and the amount
+    const glyphIssues = [];
+    for (const w of data.words || []) {
+      const d = (w.text || "").replace(/[^\d]/g, "");
+      const nSym = (w.symbols || []).length;
+      const isUtr = d.length >= 10 && d.length <= 13 && nSym >= 11 && nSym <= 13; // a UTR (maybe with one odd-looking digit)
+      const isAmt = main && main.bbox && w.bbox && w.bbox.y0 >= main.bbox.y0 - 4 && w.bbox.y1 <= main.bbox.y1 + 4 && d.length >= 2;
+      if (!isUtr && !isAmt) continue;
+      const issue = glyphCheck(w, isUtr ? "UTR" : "amount");
+      if (issue) glyphIssues.push(issue);
+    }
+    return { patches, glyphIssues, checked: targets.length };
+
+    function tallestBand() {
+      const yA = Math.round(H * 0.06), yB = Math.round(H * 0.55);
+      const rows = [];
+      for (let y = yA; y < yB; y++) {
+        const vals = [];
+        for (let x = 0; x < W; x += 3) vals.push(L(x, y));
+        const sorted = vals.slice().sort((a, b) => a - b), med = sorted[sorted.length >> 1];
+        let ink = 0, minX = W, maxX = 0;
+        for (let i = 0; i < vals.length; i++) if (Math.abs(vals[i] - med) > 60) { ink++; minX = Math.min(minX, i * 3); maxX = Math.max(maxX, i * 3); }
+        rows.push(ink >= 3 && ink < vals.length * 0.6 ? { minX, maxX } : null);
+      }
+      let best = null;
+      for (let i = 0; i < rows.length;) {
+        if (!rows[i]) { i++; continue; }
+        let j = i, x0 = W, x1 = 0;
+        while (j < rows.length && rows[j]) { x0 = Math.min(x0, rows[j].minX); x1 = Math.max(x1, rows[j].maxX); j++; }
+        const hgt = j - i;
+        if (hgt >= H * 0.02 && hgt <= H * 0.12 && x1 - x0 < W * 0.9 && (!best || hgt > best.y1 - best.y0)) best = { x0, x1, y0: yA + i, y1: yA + j };
+        i = j;
+      }
+      return best;
+    }
+
+    // ---- a faint straight edge in the background close to the text = pasted patch
+    function patchAround(b) {
+      const h = Math.max(8, b.y1 - b.y0);
+      const x0 = Math.max(2, Math.round(b.x0 - h * 1.2)), x1 = Math.min(W - 3, Math.round(b.x1 + h * 1.2));
+      const y0 = Math.max(2, Math.round(b.y0 - h * 0.7)), y1 = Math.min(H - 3, Math.round(b.y1 + h * 0.7));
+      const rw = x1 - x0, rh = y1 - y0;
+      if (rw < 20 || rh < 10) return null;
+      // background = close to the row's typical colour; everything else (text, icons) = ink
+      const bg = new Uint8Array(rw * rh);
+      for (let y = 0; y < rh; y++) {
+        const row = [];
+        for (let x = 0; x < rw; x += 2) row.push(L(x0 + x, y0 + y));
+        row.sort((a, b2) => a - b2);
+        const med = row[row.length >> 1];
+        for (let x = 0; x < rw; x++) bg[y * rw + x] = Math.abs(L(x0 + x, y0 + y) - med) < 12 ? 1 : 0;
+      }
+      // keep 3px away from any ink, so the soft edges of letters don't count
+      const R = Math.max(2, Math.round(3 * scale));
+      const clean = new Uint8Array(rw * rh);
+      for (let y = 0; y < rh; y++) for (let x = 0; x < rw; x++) {
+        let ok = 1;
+        for (let dy = -R; dy <= R && ok; dy++) for (let dx = -R; dx <= R; dx++) {
+          const yy = y + dy, xx = x + dx;
+          if (yy < 0 || yy >= rh || xx < 0 || xx >= rw) continue;
+          if (!bg[yy * rw + xx]) { ok = 0; break; }
+        }
+        clean[y * rw + x] = ok;
+      }
+      const need = Math.max(10, Math.round(h * 0.8));      // edge must be at least ~one text-line long
+      const S = Math.max(2, Math.round(1.5 * scale));       // compare pixels a little apart (resizing blurs edges)
+      const vRuns = [], hRuns = [];
+      // vertical edges (left/right side of a patch)
+      for (let x = S; x < rw - S; x++) {
+        let run = 0, sign = 0;
+        for (let y = 0; y <= rh; y++) {
+          let s = 0;
+          if (y < rh && clean[y * rw + x - S] && clean[y * rw + x + S - 1]) {
+            const dd = L(x0 + x + S - 1, y0 + y) - L(x0 + x - S, y0 + y);
+            if (Math.abs(dd) >= 2.5 && Math.abs(dd) <= 14) s = Math.sign(dd);
+          }
+          if (s && (s === sign || !run)) { run++; sign = s; continue; }
+          if (run >= need) vRuns.push({ x, ya: y - run, yb: y - 1 });
+          run = s ? 1 : 0; sign = s;
+        }
+      }
+      // horizontal edges (top/bottom of a patch)
+      for (let y = S; y < rh - S; y++) {
+        let run = 0, sign = 0;
+        for (let x = 0; x <= rw; x++) {
+          let s = 0;
+          if (x < rw && clean[(y - S) * rw + x] && clean[(y + S - 1) * rw + x]) {
+            const dd = L(x0 + x, y0 + y + S - 1) - L(x0 + x, y0 + y - S);
+            if (Math.abs(dd) >= 2.5 && Math.abs(dd) <= 14) s = Math.sign(dd);
+          }
+          if (s && (s === sign || !run)) { run++; sign = s; continue; }
+          if (run >= need) hRuns.push({ y, xa: x - run, xb: x - 1 });
+          run = s ? 1 : 0; sign = s;
+        }
+      }
+      // a pasted patch = a RECTANGLE: a side edge and a top/bottom edge meeting at a corner
+      const tol = Math.max(4, Math.round(4 * scale));
+      for (const v of vRuns) for (const hr of hRuns) {
+        const xMeets = Math.abs(v.x - hr.xa) <= tol || Math.abs(v.x - hr.xb) <= tol;
+        const yMeets = Math.abs(hr.y - v.ya) <= tol || Math.abs(hr.y - v.yb) <= tol;
+        if (xMeets && yMeets) return { edge: "corner", x: Math.round((x0 + v.x) / scale), y: Math.round((y0 + hr.y) / scale), len: Math.round((v.yb - v.ya) / scale) };
+      }
+      return null;
+    }
+
+    // ---- every digit of one number: same height, same baseline, same colour
+    function glyphCheck(word, what) {
+      const syms = (word.symbols || []).filter((s) => s.bbox && (what === "UTR" || /\d/.test(s.text || "")));
+      if (syms.length < (what === "UTR" ? 10 : 2)) return null;
+      const wb = word.bbox;
+      // threshold between ink and background for this word (Otsu)
+      const hist = new Array(256).fill(0);
+      for (let y = wb.y0; y < wb.y1; y++) for (let x = wb.x0; x < wb.x1; x++) hist[Math.round(L(x, y))]++;
+      const thr = otsu(hist);
+      const bgDark = (() => { let a = 0, n = 0; for (let i = 0; i < 256; i++) { n += hist[i]; a += hist[i] * i; } return a / n > thr; })(); // dark text on light bg?
+      const isInk = (x, y) => (bgDark ? L(x, y) < thr : L(x, y) > thr);
+      const g2 = [];
+      for (const s of syms) {
+        const b = s.bbox;
+        let top = null, bot = null, inkN = 0; const cols = [];
+        for (let y = Math.max(0, b.y0 - 3); y <= Math.min(H - 1, b.y1 + 3); y++) {
+          let any = false;
+          for (let x = b.x0; x <= b.x1; x++) if (isInk(x, y)) { any = true; inkN++; cols.push(L(x, y)); }
+          if (any) { if (top === null) top = y; bot = y; }
+        }
+        if (top === null || inkN < 6) continue;
+        // core ink colour = the strongest 20% of ink pixels
+        let core = [];
+        for (let y = top; y <= bot; y++) for (let x = b.x0; x <= b.x1; x++) if (isInk(x, y)) core.push(RGB(x, y));
+        core.sort((p, q) => (bgDark ? (p[0] + p[1] + p[2]) - (q[0] + q[1] + q[2]) : (q[0] + q[1] + q[2]) - (p[0] + p[1] + p[2])));
+        core = core.slice(0, Math.max(3, Math.round(core.length * 0.2)));
+        const col = [0, 1, 2].map((k) => core.reduce((a, p) => a + p[k], 0) / core.length);
+        g2.push({ ch: s.text, top, bot, h: bot - top + 1, col });
+      }
+      if (g2.length < (what === "UTR" ? 10 : 2)) return null;
+      const med = (arr) => arr.slice().sort((a, b) => a - b)[arr.length >> 1];
+      const mh = med(g2.map((q) => q.h)), mb = med(g2.map((q) => q.bot));
+      const mc = [0, 1, 2].map((k) => med(g2.map((q) => q.col[k])));
+      if (mh < 10 || mh / scale < 9) return null; // too tiny / blurry to judge
+      for (let i = 0; i < g2.length; i++) {
+        const q = g2[i];
+        const hOff = Math.abs(q.h - mh) / mh, bOff = Math.abs(q.bot - mb) / mh;
+        const cOff = Math.abs(q.col[0] - mc[0]) + Math.abs(q.col[1] - mc[1]) + Math.abs(q.col[2] - mc[2]);
+        if (hOff > 0.16) return { what, why: `digit "${q.ch}" is a different size`, n: i + 1 };
+        if (bOff > 0.14) return { what, why: `digit "${q.ch}" sits higher/lower than the others`, n: i + 1 };
+        if (cOff > 60) return { what, why: `digit "${q.ch}" is a different colour`, n: i + 1 };
+      }
+      return null;
+    }
+  }
+  function otsu(hist) {
+    let total = 0, sum = 0;
+    for (let i = 0; i < 256; i++) { total += hist[i]; sum += i * hist[i]; }
+    let sumB = 0, wB = 0, best = 0, thr = 128;
+    for (let i = 0; i < 256; i++) {
+      wB += hist[i]; if (!wB) continue;
+      const wF = total - wB; if (!wF) break;
+      sumB += i * hist[i];
+      const mB = sumB / wB, mF = (sum - sumB) / wF;
+      const between = wB * wF * (mB - mF) * (mB - mF);
+      if (between > best) { best = between; thr = i; }
+    }
+    return thr + 0.5;
+  }
+
+  // The phone's clock in the status bar — the first group of characters at the
+  // top-left of a real screenshot (Android & iPhone both put the time there).
+  async function readStatusBar(blob) {
+    const bmp = await createImageBitmap(blob);
+    const sh = Math.round(bmp.height * 0.045);
+    if (sh < 12) { bmp.close && bmp.close(); return null; }
+    const k = 120 / sh;
+    const c = document.createElement("canvas");
+    c.width = Math.round(bmp.width * 0.5 * k); c.height = Math.round(sh * k);
+    const g = c.getContext("2d", { willReadFrequently: true });
+    g.imageSmoothingQuality = "high";
+    g.drawImage(bmp, 0, 0, bmp.width * 0.5, sh, 0, 0, c.width, c.height);
+    bmp.close && bmp.close();
+    const W = c.width, H = c.height, p = g.getImageData(0, 0, W, H).data;
+    const lum = new Float32Array(W * H);
+    const hist = new Array(256).fill(0);
+    for (let i = 0; i < W * H; i++) { lum[i] = 0.299 * p[i * 4] + 0.587 * p[i * 4 + 1] + 0.114 * p[i * 4 + 2]; hist[Math.round(lum[i])]++; }
+    const thr = otsu(hist);
+    let dark = 0; for (let i = 0; i < W * H; i++) if (lum[i] < thr) dark++;
+    const inkDark = dark < W * H / 2;                // ink is the minority colour
+    const ink = (i) => (inkDark ? lum[i] < thr : lum[i] > thr);
+    const colInk = new Array(W).fill(0); let top = H, bot = 0;
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (ink(y * W + x)) { colInk[x]++; top = Math.min(top, y); bot = Math.max(bot, y); }
+    const th = bot - top;
+    if (th < 10) return null;
+    // first group of ink columns, ending at a gap wider than ~0.45 × text height
+    let x0 = colInk.findIndex((v) => v > 0);
+    if (x0 < 0 || x0 > W * 0.6) return null;
+    let x1 = x0, gap = 0;
+    for (let x = x0; x < W; x++) {
+      if (colInk[x] > 0) { x1 = x; gap = 0; } else if (++gap > th * 0.45) break;
+    }
+    const pad = Math.round(th * 0.4);
+    const crop = document.createElement("canvas");
+    crop.width = x1 - x0 + pad * 2; crop.height = th + pad * 2;
+    const cg = crop.getContext("2d");
+    cg.fillStyle = inkDark ? "#fff" : "#000"; cg.fillRect(0, 0, crop.width, crop.height);
+    cg.drawImage(c, x0, top, x1 - x0 + 1, th + 1, pad, pad, x1 - x0 + 1, th + 1);
+    if (!inkDark) { cg.globalCompositeOperation = "difference"; cg.fillStyle = "#fff"; cg.fillRect(0, 0, crop.width, crop.height); }
+    const w = await digitWorker();
+    const { data } = await w.recognize(crop);
+    const t = (data.text || "").replace(/[^\d:.]/g, "");
+    let m = t.match(/^([01]?\d|2[0-3])[:.]([0-5]\d)$/);
+    if (!m) { const d = t.replace(/\D/g, ""); if (/^\d{3,4}$/.test(d)) m = d.match(/^(\d{1,2})(\d{2})$/); } // colon not read: last 2 digits are minutes
+    if (!m || +m[1] > 23 || +m[2] > 59) return null;
+    return { h: +m[1], m: +m[2], label: m[1] + ":" + m[2] };
+  }
+
+  // Status-bar clock vs. when the order is being placed (and vs. the payment time).
+  function statusCheck(st, text, when) {
+    if (!st) return { statusOk: null };
+    const ist = new Date(new Date(when).toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
+    const nowMin = ist.getHours() * 60 + ist.getMinutes();
+    const cands = st.h <= 12 ? [st.h % 12, (st.h % 12) + 12] : [st.h];
+    // minutes BEFORE the order the screenshot was taken (negative = in the future)
+    const before = cands.map((hh) => { let d = nowMin - (hh * 60 + st.m); if (d < -720) d += 1440; if (d > 720) d -= 1440; return d; });
+    const best = before.reduce((a, b) => (Math.abs(b) < Math.abs(a) ? b : a));
+    const statusOk = best >= -3 && best <= 90;
+    return { statusOk, statusSeen: st.label, statusAgo: best };
   }
 
   // Letters OCR confuses with digits, fixed only inside number-like chunks.
@@ -568,6 +842,24 @@
   //                  wrong amount, old date…). Refused at first; after 2 tries the student
   //                  may send it to the owner for a manual check (shown in red).
   //   soft         → couldn't confirm (blurry etc.) — same retry → manual-check path.
+  // Which UPI app made this screenshot, and does it show that app's normal
+  // "payment done" details? Prank / fake-payment apps usually miss some of them.
+  const APPS = [
+    { name: "Paytm", id: /paytm/i, marks: [/ref\.?\s*no/i, /upi\s*ref/i, /check\s*balance/i, /pay\s*again/i, /paid\s*success/i, /money\s*sent/i, /payment\s*success/i, /sent\s*success/i] },
+    { name: "PhonePe", id: /phone\s*pe/i, marks: [/transaction\s*success/i, /payment\s*success/i, /paid\s*to/i, /\butr\b/i, /transaction\s*id/i, /debited\s*from/i] },
+    { name: "Google Pay", id: /google\s*pay|\bg\s?pay\b|google\s*transaction/i, marks: [/upi\s*transaction\s*id/i, /google\s*transaction\s*id/i, /completed/i, /paid\s*to/i, /payment\s*(was\s*)?success/i] },
+    { name: "BHIM", id: /\bbhim\b/i, marks: [/success/i, /\b(ref|rrn|utr)\b/i, /transaction\s*id/i] },
+    { name: "Amazon Pay", id: /amazon\s*pay/i, marks: [/success/i, /bank\s*reference|upi\s*ref|\butr\b/i] },
+    { name: "CRED", id: /\bcred\b/i, marks: [/success|paid/i, /\b(utr|ref|rrn)\b/i] },
+  ];
+  function layoutCheck(text) {
+    const app = APPS.find((a) => a.id.test(text)) || null;
+    const marks = app ? app.marks.filter((m) => m.test(text)).length : 0;
+    const anySuccess = /\b(success|successful|successfully|completed|paid|sent|received|debited)\b/i.test(text);
+    const refWord = /\b(ref|utr|rrn|upi|transaction|txn)\b/i.test(text);
+    return { app: app ? app.name : null, appMarks: marks, layoutOk: app ? marks >= 1 : (anySuccess || refWord) ? null : false };
+  }
+
   function judgeScreenshot(text, meta, ctx) {
     const cands = utrCandidates(text);
     const r = {
@@ -576,12 +868,17 @@
       amount: amountInText(text, ctx.total),
       payee: payeeSeen(text, ctx.settings),
       wrongAmounts: [],
-      demo: ((text.match(/\b(test|demo|sample|dummy|fake|mock|specimen)\b/i) || [])[0]) || null,
+      demo: ((text.match(/\b(test|demo|sample|dummy|fake|mock|specimen|prank|spoof|for entertainment|entertainment purpose|fake payment)\b/i) || [])[0]) || null,
       failed: /\b(failed|declined|pending|processing|reversed)\b/i.test(text),
       success: /\b(success|successful|completed|paid)\b/i.test(text),
       ...timeCheck(text, ctx.when),
+      ...statusCheck(ctx.statusTime, text, ctx.when),
+      ...layoutCheck(text),
       ...meta,
     };
+    const fz = ctx.forensic || null;
+    r.patches = fz ? fz.patches : [];
+    r.glyphIssues = fz ? fz.glyphIssues : [];
     // a UTR that differs from the typed one by a digit or two
     r.utrSeen = !r.utr && /^\d{12}$/.test(ctx.utr || "") ? cands.find((c) => digitsDiff(c, ctx.utr) <= 2) || null : null;
 
@@ -607,6 +904,11 @@
     if (readable && r.dateOld) add("date", false, `The screenshot is from ${r.dateSeen}. Upload the screenshot of today's payment.`);
     if (r.tooSmall) add("small", false, `The image is too small (${r.w}×${r.h}) — it was resized or forwarded. Upload the original screenshot from your phone's gallery.`);
     if (readable && r.timeOk === false) add("time", false, `The time in the screenshot (${r.timeSeen.join(", ")}) doesn't match this order. Take a fresh screenshot right after paying.`);
+    if (readable && r.statusOk === false) add("status", false, `The phone clock in this screenshot shows ${r.statusSeen} — it wasn't taken just now. Pay for this order and take a fresh screenshot.`);
+    if (readable && r.patches.length) add("patch", false, `The ${r.patches[0].what} area of this screenshot looks edited (a pasted patch). Upload the original screenshot from your UPI app, without editing.`);
+    if (readable && r.glyphIssues.length) add("glyph", false, `In the ${r.glyphIssues[0].what}, ${r.glyphIssues[0].why} — it looks edited. Upload the original screenshot from your UPI app.`);
+    if (readable && !r.app && r.layoutOk === false) add("layout", false, "This doesn't look like a UPI payment-success screen. Upload the screenshot of the success page (it shows the amount, the date/time and the UPI Ref No.).");
+    if (readable && r.app && r.appMarks === 0) add("layout", false, `This doesn't look like a real ${r.app} payment-success screen. Upload the original screenshot of the success page.`);
     const soft = [];
     if (!r.utr && !r.utrSeen) soft.push("utr");
     if (!r.amount && !sureWrong) soft.push("amount");

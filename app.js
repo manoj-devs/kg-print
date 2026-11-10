@@ -609,7 +609,7 @@ function startShotOcr(file) {
   const job = { file, text: null, lines: [], meta: null, error: null };
   job.promise = Promise.all([
     file.arrayBuffer().then((buf) => KG.inspectImage(buf, file)).then((m) => { job.meta = m; }).catch(() => { job.meta = {}; }),
-    KG.ocrImage(file).then((res) => { job.text = res.text; job.lines = res.lines; job.mainDigits = res.mainDigits; job.bigReads = res.bigReads; if (shotOcr === job) autoFillUtr(); }).catch((e) => { job.error = e; console.warn("OCR failed", e); }),
+    KG.ocrImage(file).then((res) => { job.text = res.text; job.lines = res.lines; job.mainDigits = res.mainDigits; job.bigReads = res.bigReads; job.forensic = res.forensic; job.statusTime = res.statusTime; if (shotOcr === job) autoFillUtr(); }).catch((e) => { job.error = e; console.warn("OCR failed", e); }),
   ]).then(() => checkReuse(job)).finally(() => { if (shotOcr === job) showShotStatus(); });
   shotOcr = job;
   showShotStatus();
@@ -635,7 +635,7 @@ function shotResult() {
   if (!shotOcr) return null;
   if (shotOcr.meta === null || (shotOcr.text === null && !shotOcr.error)) return { state: "reading" };
   const utr = $("#fUtr").value.trim();
-  const ctx = { utr, total: orderTotal(), settings, when: Date.now(), lines: shotOcr.lines, mainDigits: shotOcr.mainDigits, bigReads: shotOcr.bigReads };
+  const ctx = { utr, total: orderTotal(), settings, when: Date.now(), lines: shotOcr.lines, mainDigits: shotOcr.mainDigits, bigReads: shotOcr.bigReads, forensic: shotOcr.forensic, statusTime: shotOcr.statusTime };
   if (!shotOcr.error && (shotOcr.text || "").replace(/\s/g, "").length < 15) {
     shotOcr.error = new Error("almost no text could be read from the screenshot");
   }
@@ -707,6 +707,12 @@ function autoFillUtr() {
     hint.classList.add("qr-saved");
     showShotStatus();
   }
+}
+
+// the size of THIS phone's screen in real pixels (a screenshot taken on it is the same size)
+function devScreen() {
+  try { const d = window.devicePixelRatio || 1; return { w: Math.round(screen.width * d), h: Math.round(screen.height * d), mobile: /Android|iPhone/i.test(navigator.userAgent) }; }
+  catch (e) { return null; }
 }
 
 // ---------------- submit ----------------
@@ -787,7 +793,7 @@ async function submitOrder(e) {
     //    the student may send it to the owner for a manual check (marked in red)
     const problems = [...(r.hard || []).map((h) => h.code), ...(r.soft || [])];
     if (r.state === "unavailable") {
-      studentCheck = { unavailable: true, why: String((shotOcr.error && (shotOcr.error.message || shotOcr.error)) || "").slice(0, 120) };
+      studentCheck = { dev: devScreen(), unavailable: true, why: String((shotOcr.error && (shotOcr.error.message || shotOcr.error)) || "").slice(0, 120) };
     } else {
       if (problems.length && !$("#fOverride").checked) {
         ocrFails++;
@@ -799,7 +805,7 @@ async function submitOrder(e) {
           : `The screenshot doesn't show payment to ${settings.payee_name}. Make sure you paid the shop.`;
         return fail(ocrFails >= 2 ? what + " If your payment is correct, tick the box below to send it to the shop owner." : what, problems.includes("utr") ? "#fUtr" : "#fShot");
       }
-      studentCheck = { utr: r.utr, amount: r.amount, payee: r.payee, override: problems.length > 0, missing: problems, utrSeen: r.utrSeen || null };
+      studentCheck = { utr: r.utr, amount: r.amount, payee: r.payee, override: problems.length > 0, missing: problems, utrSeen: r.utrSeen || null, dev: devScreen() };
     }
 
     setBusy("Checking payment details…");

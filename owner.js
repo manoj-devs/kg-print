@@ -160,96 +160,12 @@ function renderOpen() {
   $("#openLabel").textContent = settings.shop_open ? "Open" : "Closed";
   $("#upiWarn").hidden = !!settings.upi_id && settings.upi_id !== "owner@upi";
 }
-// ---------------- auto-verify payments (bank alerts) ----------------
-let creditToken = null;
-async function loadAutoVerify() {
-  const box = $("#avBody");
-  const { data, error } = await sb.rpc("get_credit_token");
-  if (error || !data) {
-    box.innerHTML = `<p class="hint">Not set up yet — run <b>supabase/update-4.sql</b> in Supabase (SQL Editor), then open Settings again.</p>`;
-    return;
-  }
-  creditToken = data;
-  const cfg = window.KG_CONFIG;
-  const url = cfg.SUPABASE_URL.replace(/\/$/, "") + "/rest/v1/rpc/bank_credit";
-  box.innerHTML = `
-    <p class="hint" style="margin-top:0">When the bank alert for a payment arrives ("INR 4.75 CREDITED … UPI Ref …"), it's sent here and the matching order is <b>accepted automatically</b>.</p>
-    <div class="row" style="gap:6px;margin-bottom:8px">
-      <button type="button" class="btn small primary" id="avCopyScript">📋 Copy Gmail script</button>
-      <button type="button" class="btn small" id="avCopyUrl">Copy link</button>
-      <button type="button" class="btn small" id="avCopyKey">Copy secret key</button>
-    </div>
-    <label class="field"><span>Test: paste a bank message</span>
-      <textarea id="avTestText" placeholder="e.g. An amount of INR 4.75 has been CREDITED to your account XXX556 with UPI Ref No.:219998102253"></textarea></label>
-    <div class="row" style="justify-content:space-between"><button type="button" class="btn small" id="avTest">Test it</button><small id="avTestResult" class="muted"></small></div>
-    <h4 style="margin:12px 0 6px">Recent bank alerts</h4>
-    <div id="avRecent" class="blocked-list"><small class="muted">Loading…</small></div>`;
-  $("#avCopyUrl").onclick = () => copyText(url, "Link copied");
-  $("#avCopyKey").onclick = () => copyText(creditToken, "Secret key copied");
-  $("#avCopyScript").onclick = () => copyText(gmailScript(url, cfg.SUPABASE_ANON_KEY, creditToken), "Gmail script copied — paste it in script.google.com");
-  $("#avTest").onclick = async () => {
-    const text = $("#avTestText").value.trim();
-    if (!text) return;
-    const { data: r, error: e } = await sb.rpc("bank_credit", { p_token: creditToken, p_text: text, p_source: "test" });
-    $("#avTestResult").textContent = e ? "Error: " + e.message : r;
-    loadRecentCredits();
-  };
-  loadRecentCredits();
-}
-async function loadRecentCredits() {
-  const { data } = await sb.from("bank_credits").select("*").order("received_at", { ascending: false }).limit(8);
-  const tokenOf = (id) => (orders.find((o) => o.id === id) || {}).token;
-  $("#avRecent").innerHTML = (data || []).length ? data.map((c) => `<div class="blocked-row"><div><b>${rupeesExact(c.amount)}</b> · ${c.utr ? "UTR " + esc(c.utr) : "no UTR"} · ${esc(c.source || "")}<br>
-      <small class="muted">${new Date(c.received_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })} · ${c.matched_order ? "matched " + esc(tokenOf(c.matched_order) || "order") : "not matched"}</small></div></div>`).join("")
-    : `<small class="muted">No bank alerts received yet.</small>`;
-}
-async function copyText(t, msg) {
-  try { await navigator.clipboard.writeText(t); toast(msg, "ok", 3000); }
-  catch (e) { prompt("Copy this:", t); }
-}
-function gmailScript(url, key, token) {
-  return `// KG Print — send bank "CREDITED" emails to the shop website (runs every minute)
-// 1) script.google.com → New project → paste this → Save
-// 2) Run "setup" once → Allow access to Gmail
-const URL = ${JSON.stringify(url)};
-const KEY = ${JSON.stringify(key)};
-const SECRET = ${JSON.stringify(token)};
-// which emails to read: bank credit alerts from the last day
-const SEARCH = 'newer_than:1d (credited OR "has been credited" OR received) -label:kgprint-done';
-
-function checkBankMails() {
-  const done = GmailApp.getUserLabelByName('kgprint-done') || GmailApp.createLabel('kgprint-done');
-  const threads = GmailApp.search(SEARCH, 0, 20);
-  for (const t of threads) {
-    for (const m of t.getMessages()) {
-      const text = (m.getSubject() + ' ' + m.getPlainBody()).replace(/\\s+/g, ' ').slice(0, 2500);
-      if (!/credited|received/i.test(text)) continue;
-      const res = UrlFetchApp.fetch(URL, {
-        method: 'post', contentType: 'application/json', muteHttpExceptions: true,
-        headers: { apikey: KEY },
-        payload: JSON.stringify({ p_token: SECRET, p_text: text, p_source: 'gmail' }),
-      });
-      console.log(res.getContentText());
-    }
-    t.addLabel(done);
-  }
-}
-
-function setup() {
-  ScriptApp.getProjectTriggers().forEach((tr) => ScriptApp.deleteTrigger(tr));
-  ScriptApp.newTrigger('checkBankMails').timeBased().everyMinutes(1).create();
-  checkBankMails();
-}
-`;
-}
-
 function openSettings() {
   const f = $("#settingsForm");
   ["shop_name", "upi_id", "payee_name", "bw_single", "bw_double", "color_single", "color_double", "notice"].forEach((k) => (f.elements[k].value = settings[k] ?? ""));
 
   $("#settingsModal").hidden = false;
   loadBlocked();
-  loadAutoVerify();
 }
 
 // ---------------- blocked students ----------------
@@ -683,7 +599,7 @@ function checkChips(o) {
   if (o.bank_note && !o.bank_verified) chips.unshift(`<span class="chip bad">🏦 ${esc(o.bank_note)}</span>`);
   const s = o.student_check;
   if (s && s.override) {
-    const LABEL = { utr: "UTR doesn't match", amount: "amount", payee: "shop name", time: "payment time", date: "date", failed: "failed/pending", small: "small/forwarded image" };
+    const LABEL = { utr: "UTR doesn't match", amount: "amount", payee: "shop name", time: "payment time", date: "date", failed: "failed/pending", small: "small/forwarded image", status: "phone clock", patch: "edited patch", glyph: "edited digit", layout: "not a real receipt" };
     chips.push(`<span class="chip bad">✕ Student sent for MANUAL CHECK — problem: ${esc((s.missing || ["utr"]).map((m) => LABEL[m] || m).join(", "))}</span>`);
     if (s.utrSeen) chips.push(`<span class="chip bad">✕ Screenshot shows UTR ${esc(s.utrSeen)}, student typed ${esc(o.utr)}</span>`);
   }
@@ -722,6 +638,24 @@ function checkChips(o) {
     else if (c.type) chips.push(chip("meh", `${esc(c.type.toUpperCase())} file`));
     if (c.tooSmall) chips.push(chip("bad", `✕ Too small ${c.w}×${c.h} — resized/forwarded`));
     else if (c.phoneShape === false) chips.push(chip("meh", `Unusual size ${c.w}×${c.h}`, "Real phone screenshots are tall (like 1080×2400). Cropped or made-up images often aren't."));
+
+    // pixel checks: pasted patches / odd digits
+    if (c.patches && c.patches.length) chips.push(chip("bad", `✕ Looks edited near the ${esc(c.patches[0].what)} (pasted patch)`, `A faint straight edge was found in the background next to the ${c.patches[0].what} (at x=${c.patches[0].x}, y=${c.patches[0].y}). Real screenshots don't have one. Zoom into the screenshot and look closely.`));
+    if (c.glyphIssues && c.glyphIssues.length) chips.push(chip("bad", `✕ ${esc(c.glyphIssues[0].what)}: ${esc(c.glyphIssues[0].why)}`, "In a real screenshot every digit of a number has the same size, line and colour."));
+    if (c.v >= 6 && !(c.patches || []).length && !(c.glyphIssues || []).length) chips.push(chip("good", "✓ No edit marks found"));
+
+    // the phone clock in the status bar
+    if (c.statusOk === true) chips.push(chip("good", `✓ Phone clock ${esc(c.statusSeen)} fits`));
+    else if (c.statusOk === false) chips.push(chip("bad", `✕ Phone clock shows ${esc(c.statusSeen)} — old screenshot?`, "The status-bar clock in the screenshot is not close to the time the order was placed."));
+
+    // looks like the UPI app's success screen?
+    if (c.app && c.appMarks) chips.push(chip("good", `✓ Looks like ${esc(c.app)} success screen`));
+    else if (c.app && c.appMarks === 0) chips.push(chip("bad", `✕ Doesn't look like a real ${esc(c.app)} receipt`, "Fake-payment / prank apps often miss details the real app always shows."));
+    else if (c.layoutOk === false) chips.push(chip("bad", "✕ Not a payment-success screen"));
+  }
+  const dev = o.student_check && o.student_check.dev;
+  if (dev && dev.mobile && c && c.w && dev.w && Math.abs(dev.w - c.w) > 4 && Math.abs(dev.h - c.w) > 4) {
+    chips.push(chip("meh", `Screenshot ${c.w} px wide, student's phone ${dev.w} px`, "The screenshot wasn't taken on the phone that placed the order (friend paid / forwarded / made elsewhere). Check the payment in your UPI app."));
   }
   if (o.shot_taken_at) {
     const mins = Math.round((new Date(o.created_at) - new Date(o.shot_taken_at)) / 60000);
@@ -849,7 +783,7 @@ async function runOcr() {
       const buf = await (await fetch(url)).arrayBuffer();
       const blob = new Blob([buf]);
       const [read, meta] = await Promise.all([KG.ocrImage(blob), KG.inspectImage(buf, blob)]);
-      const j = KG.judgeScreenshot(read.text, meta, { utr: o.utr, total: o.total, settings, when: o.created_at, lines: read.lines, mainDigits: read.mainDigits, bigReads: read.bigReads });
+      const j = KG.judgeScreenshot(read.text, meta, { utr: o.utr, total: o.total, settings, when: o.created_at, lines: read.lines, mainDigits: read.mainDigits, bigReads: read.bigReads, forensic: read.forensic, statusTime: read.statusTime });
       const result = { ...j, v: CHECK_VERSION, at: new Date().toISOString() };
 
       // Was any UTR in this screenshot already used by ANOTHER order? (reused payment)
@@ -888,7 +822,7 @@ async function runOcr() {
   ocrBusy = false;
 }
 
-const CHECK_VERSION = 5;
+const CHECK_VERSION = 6;
 function isChecked(o) { return !!o.auto_check && (o.auto_check.error || o.auto_check.v === CHECK_VERSION); }
 
 // ---------------- storage cleanup (keeps free 1 GB from filling up) ----------------
