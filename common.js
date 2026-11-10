@@ -513,9 +513,11 @@
         const q = g2[i];
         const hOff = Math.abs(q.h - mh) / mh, bOff = Math.abs(q.bot - mb) / mh;
         const cOff = Math.abs(q.col[0] - mc[0]) + Math.abs(q.col[1] - mc[1]) + Math.abs(q.col[2] - mc[2]);
-        if (hOff > 0.16) return { what, why: `digit "${q.ch}" is a different size`, n: i + 1 };
-        if (bOff > 0.14) return { what, why: `digit "${q.ch}" sits higher/lower than the others`, n: i + 1 };
-        if (cOff > 60) return { what, why: `digit "${q.ch}" is a different colour`, n: i + 1 };
+        // name the digit only for the UTR — in the amount the "₹" sign is often read as a digit
+        const which = what === "UTR" ? `digit no. ${i + 1} ("${q.ch}")` : "part of the amount";
+        if (hOff > 0.16) return { what, why: `${which} is a different size from the rest`, n: i + 1 };
+        if (bOff > 0.14) return { what, why: `${which} sits higher/lower than the rest`, n: i + 1 };
+        if (cOff > 60) return { what, why: `${which} is a different colour from the rest`, n: i + 1 };
       }
       return null;
     }
@@ -906,7 +908,7 @@
     if (readable && r.timeOk === false) add("time", false, `The time in the screenshot (${r.timeSeen.join(", ")}) doesn't match this order. Take a fresh screenshot right after paying.`);
     if (readable && r.statusOk === false) add("status", false, `The phone clock in this screenshot shows ${r.statusSeen} — it wasn't taken just now. Pay for this order and take a fresh screenshot.`);
     if (readable && r.patches.length) add("patch", false, `The ${r.patches[0].what} area of this screenshot looks edited (a pasted patch). Upload the original screenshot from your UPI app, without editing.`);
-    if (readable && r.glyphIssues.length) add("glyph", false, `In the ${r.glyphIssues[0].what}, ${r.glyphIssues[0].why} — it looks edited. Upload the original screenshot from your UPI app.`);
+    if (readable && r.glyphIssues.length) add("glyph", false, `This screenshot looks edited: in the ${r.glyphIssues[0].what}, ${r.glyphIssues[0].why}. Upload the original screenshot from your UPI app, without editing.`);
     if (readable && !r.app && r.layoutOk === false) add("layout", false, "This doesn't look like a UPI payment-success screen. Upload the screenshot of the success page (it shows the amount, the date/time and the UPI Ref No.).");
     if (readable && r.app && r.appMarks === 0) add("layout", false, `This doesn't look like a real ${r.app} payment-success screen. Upload the original screenshot of the success page.`);
     const soft = [];

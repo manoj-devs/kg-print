@@ -3,7 +3,7 @@ const { sb, $, $$, esc, rupees, rupeesExact, STATUS, toast, fmtTime, fmtDay, tod
 
 const KIND_LABEL = { pdf: "PDF", image: "IMG", docx: "DOCX", doc: "DOC" };
 const DAY = 864e5;
-const CLEANUP_AFTER_DAYS = 3;
+const CLEANUP_AFTER_DAYS = 2;
 
 let user = null;
 let settings = null;
@@ -48,7 +48,14 @@ async function init() {
   subscribe();
   cleanup(false);
 
-  setInterval(() => { if (!document.hidden) loadOrders(); }, 45000);
+  // Save free download quota: when the live connection works, changes arrive by
+  // themselves — only check the waiting orders every 5 min, everything every hour.
+  setInterval(() => {
+    if (document.hidden) return;
+    const since = Date.now() - lastFullLoad;
+    if (!liveOk || since > 60 * 60000) loadOrders();
+    else if (Date.now() - lastLightLoad > 5 * 60000) loadOrders(true);
+  }, 45000);
   setInterval(remindPending, 3 * 60000);
   setInterval(() => cleanup(false), 60 * 60000);
 }
@@ -441,12 +448,21 @@ async function saveSettings(e) {
 }
 
 // ---------------- orders ----------------
-async function loadOrders() {
+let liveOk = false, lastFullLoad = 0, lastLightLoad = 0;
+const ACTIVE = ["payment_review", "queued", "ready"];
+async function loadOrders(light) {
   const since = new Date(Date.now() - CLEANUP_AFTER_DAYS * DAY).toISOString();
-  const { data, error } = await sb.from("orders").select("*")
-    .or(`status.in.(payment_review,queued,ready),created_at.gte."${since}"`)
-    .order("created_at", { ascending: true }).limit(500);
+  let q = sb.from("orders").select("*");
+  q = light ? q.in("status", ACTIVE) : q.or(`status.in.(payment_review,queued,ready),created_at.gte."${since}"`);
+  let { data, error } = await q.order("created_at", { ascending: true }).limit(500);
   if (error) { toast("Couldn't load orders: " + error.message, "error"); return; }
+  if (light) {
+    lastLightLoad = Date.now();
+    // an order we had as waiting is gone from the list → it changed; reload everything
+    const got = new Set(data.map((o) => o.id));
+    if (orders.some((o) => ACTIVE.includes(o.status) && !got.has(o.id))) return loadOrders();
+    data = [...orders.filter((o) => !ACTIVE.includes(o.status)), ...data];
+  } else { lastFullLoad = lastLightLoad = Date.now(); }
 
   if (firstLoadDone) {
     data.filter((o) => !knownIds.has(o.id) && o.status === "payment_review").forEach(alertNew);
@@ -477,6 +493,7 @@ function subscribe() {
     })
     .subscribe((status) => {
       const dot = $("#liveDot");
+      liveOk = status === "SUBSCRIBED";
       if (status === "SUBSCRIBED") { dot.textContent = "● live"; dot.style.color = "var(--ok)"; }
       else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") { dot.textContent = "● reconnecting… (auto-refresh every 45s)"; dot.style.color = "var(--warn)"; }
     });
@@ -840,10 +857,10 @@ async function deletePrints(list) {
 async function cleanup(manual) {
   const cutoff = new Date(Date.now() - CLEANUP_AFTER_DAYS * DAY).toISOString();
   const [a, b] = await Promise.all([
-    // print files: collected orders, or anything older than 3 days
+    // print files: collected orders, rejected for 6+ hours, or anything older than 2 days
     sb.from("orders").select("id,files,status,created_at").eq("files_deleted", false)
-      .or(`status.eq.collected,created_at.lt."${cutoff}"`).limit(200),
-    // screenshots: older than 3 days
+      .or(`status.eq.collected,created_at.lt."${cutoff}",and(status.eq.rejected,updated_at.lt."${new Date(Date.now() - 6 * 3600000).toISOString()}")`).limit(200),
+    // screenshots: older than 2 days
     sb.from("orders").select("id,screenshot_path").eq("shot_deleted", false).lt("created_at", cutoff).limit(200),
   ]);
   if (a.error || b.error) { if (manual) toast((a.error || b.error).message, "error"); return; }

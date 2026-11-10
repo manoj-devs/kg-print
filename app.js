@@ -11,6 +11,7 @@ const KIND_LABEL = { pdf: "PDF", image: "IMG", docx: "DOCX", doc: "DOC" };
 const MAX_FILE = 25 * 1024 * 1024;
 const MAX_SHOT = 8 * 1024 * 1024;
 const MAX_FILES = 20;
+const MAX_ORDER = 60 * 1024 * 1024; // all files of one order together
 
 let user = null;
 let settings = null;
@@ -328,6 +329,7 @@ function addFiles(fileList) {
     if (!kind) { toast(`${file.name}: only PDF, Word or photo files`, "error"); continue; }
     if (file.size > MAX_FILE) { toast(`${file.name} is bigger than 25 MB`, "error"); continue; }
     if (file.size === 0) { toast(`${file.name} is empty`, "error"); continue; }
+    if (items.reduce((a, x) => a + x.file.size, 0) + file.size > MAX_ORDER) { toast(`${file.name}: one order can be at most 60 MB in total. Send the rest as a second order.`, "error", 7000); continue; }
     const it = {
       id: crypto.randomUUID(), file, name: file.name, kind,
       pages: 1, total: 1, range: "", rangeMode: "all", rangeErr: "", pagesSource: kind === "image" ? "auto" : "manual",
@@ -338,7 +340,7 @@ function addFiles(fileList) {
     // Copy the file into memory NOW. On phones, the browser loses access to picked
     // files after you switch apps (e.g. to Paytm to pay), so we never read it again later.
     keepInMemory(file)
-      .then((copy) => { it.file = copy; return it.kind === "pdf" || it.kind === "docx" ? countPages(it) : null; })
+      .then((copy) => { it.file = copy; return it.kind === "image" ? shrinkPhoto(copy).then((f) => { it.file = f; it.name = f.name; }) : it.kind === "pdf" || it.kind === "docx" ? countPages(it) : null; })
       .catch(() => {
         items = items.filter((x) => x !== it);
         toast(`Couldn't read ${file.name}. Please select it again.`, "error", 6000);
@@ -346,6 +348,28 @@ function addFiles(fileList) {
       .finally(() => { it.loading = false; renderItems(); });
   }
   renderItems();
+}
+
+// Big phone photos (4–8 MB) are made smaller before upload: max 3000 px on the long
+// side (≈ 250 dpi on A4 — still sharp in print) as a high-quality JPEG. Faster upload
+// for the student, and much less of the free storage / download quota used.
+async function shrinkPhoto(file) {
+  if (file.size < 1.5 * 1024 * 1024) return file;
+  try {
+    const bmp = await createImageBitmap(file);
+    const k = Math.min(1, 3000 / Math.max(bmp.width, bmp.height));
+    const c = document.createElement("canvas");
+    c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k);
+    const g = c.getContext("2d");
+    g.fillStyle = "#fff"; g.fillRect(0, 0, c.width, c.height); // transparent PNG → white paper
+    g.imageSmoothingQuality = "high";
+    g.drawImage(bmp, 0, 0, c.width, c.height);
+    bmp.close && bmp.close();
+    const blob = await new Promise((r) => c.toBlob(r, "image/jpeg", 0.9));
+    if (!blob || blob.size > file.size * 0.85) return file; // not worth it
+    const name = file.name.replace(/\.[^.]+$/, "") + ".jpg";
+    return new File([blob], name, { type: "image/jpeg", lastModified: file.lastModified });
+  } catch (e) { return file; } // a format the browser can't open (e.g. HEIC) — send as it is
 }
 
 async function keepInMemory(file) {
@@ -928,17 +952,20 @@ async function loadMyOrders() {
       if (old && old.status !== p.new.status) setTimeout(refreshQueue, 300);
       upsertOrder(p.new);
     })
-    .subscribe();
+    .subscribe((st) => { myLive = st === "SUBSCRIBED"; });
 
   // refresh when coming back to the tab (in case the live connection slept)
   if (!loadMyOrders.wired) {
     loadMyOrders.wired = true;
     document.addEventListener("visibilitychange", () => { if (!document.hidden && user) refreshOrders(); });
-    setInterval(() => { if (user && !document.hidden) refreshOrders(); }, 60000);
+    // live connection works → changes arrive by themselves; only check every 5 min
+    setInterval(() => { if (user && !document.hidden && (!myLive || Date.now() - lastRefresh > 5 * 60000)) refreshOrders(); }, 60000);
   }
 }
 
+var myLive = false, lastRefresh = 0;
 async function refreshOrders() {
+  lastRefresh = Date.now();
   const { data } = await sb.from("orders").select("*")
     .eq("user_id", user.id).order("created_at", { ascending: false }).limit(30);
   if (!data) return;
