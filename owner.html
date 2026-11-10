@@ -11,8 +11,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=20261111a">
-  <link rel="stylesheet" href="owner.css?v=20261111a">
+  <link rel="stylesheet" href="styles.css?v=20261111b">
+  <link rel="stylesheet" href="owner.css?v=20261111b">
 </head>
 <body>
   <header class="topbar">
@@ -212,7 +212,7 @@
       <h3 style="margin-bottom:6px">Blocked students</h3>
       <div id="blockedList" class="blocked-list"><small class="muted">Loading…</small></div>
       <hr style="border:0;border-top:1px solid var(--line);margin:16px 0">
-      <p class="hint">Files are deleted automatically when an order is marked Collected, 6 hours after a rejection, and all files older than 2 days are cleaned up, so free storage never fills up.</p>
+      <p class="hint">Print files are deleted automatically 3 hours after "Printed — mark ready" (time to reprint a misprint), when an order is Collected, or 6 hours after a rejection. Everything older than 2 days is cleaned up too, so free storage never fills up. Payment screenshots are kept for 2 days.</p>
       <button type="button" class="btn small" id="cleanupBtn">🧹 Clean up old files now</button>
     </form>
   </div>
@@ -220,8 +220,8 @@
   <div id="toasts"></div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
-  <script src="config.js?v=20261111a"></script>
-  <script src="common.js?v=20261111a"></script>
-  <script src="owner.js?v=20261111a"></script>
+  <script src="config.js?v=20261111b"></script>
+  <script src="common.js?v=20261111b"></script>
+  <script src="owner.js?v=20261111b"></script>
 </body>
 </html>
