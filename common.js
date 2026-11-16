@@ -101,11 +101,11 @@
     if (Notification.permission === "denied") return false;
     return (await Notification.requestPermission()) === "granted";
   }
-  async function notify(title, body) {
+  async function notify(title, body, sticky) {
     if (!("Notification" in window) || Notification.permission !== "granted") return;
     try {
       const reg = navigator.serviceWorker && (await navigator.serviceWorker.getRegistration());
-      const opts = { body, icon: "icon.svg", badge: "icon.svg", tag: "kg-" + Date.now(), renotify: true, vibrate: [300, 120, 300] };
+      const opts = { body, icon: "icon.svg", badge: "icon.svg", tag: "kg-" + Date.now(), renotify: true, vibrate: [300, 120, 300], requireInteraction: !!sticky };
       if (reg) return reg.showNotification(title, opts);
       new Notification(title, opts);
     } catch (e) { /* ignore */ }

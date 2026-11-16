@@ -45,6 +45,7 @@ async function init() {
   $("#dash").hidden = false;
   $("#topActions").hidden = false;
   wireEvents();
+  autoAlerts();
   await loadSettings();
   await loadOrders();
   subscribe();
@@ -119,9 +120,9 @@ function wireEvents() {
 }
 
 // ---------------- alerts ----------------
-async function enableAlerts() {
+async function enableAlerts(quiet) {
   KG.unlockAudio();
-  KG.chime(1);
+  if (quiet !== true) KG.chime(1);
   const notifOk = await KG.askNotify();
   await keepAwake();
   alertsOn = true;
@@ -132,6 +133,25 @@ async function enableAlerts() {
   $("#testBtn").onclick = () => KG.chime(1);
 }
 
+// Alerts switch themselves on when the dashboard opens: notifications need no click once
+// allowed; the chime needs one click anywhere (browser rule) unless the dashboard is installed as an app.
+function autoAlerts() {
+  const notifOk = "Notification" in window && Notification.permission === "granted";
+  KG.unlockAudio();
+  keepAwake();
+  document.addEventListener("visibilitychange", () => { if (!document.hidden && alertsOn) keepAwake(); });
+  setTimeout(() => {
+    if (KG.audioReady() && notifOk) return enableAlerts(true);
+    if (!notifOk) return; // first time: the owner must press 'Turn on alerts' once and allow notifications
+    alertsOn = true;
+    const bar = $("#alertBar");
+    bar.classList.add("on");
+    bar.innerHTML = `<span><b>🔔 Notifications are ON.</b> Click anywhere on this page once to switch on the sound too.</span>`;
+    const once = () => { enableAlerts(true); ["pointerdown", "keydown"].forEach((e) => document.removeEventListener(e, once, true)); };
+    ["pointerdown", "keydown"].forEach((e) => document.addEventListener(e, once, true));
+  }, 400);
+}
+
 async function keepAwake() {
   try {
     if ("wakeLock" in navigator && !document.hidden) wakeLock = await navigator.wakeLock.request("screen");
@@ -140,7 +160,7 @@ async function keepAwake() {
 
 function alertNew(o) {
   KG.chime(3);
-  KG.notify(`New order ${o.token} · ${rupeesExact(o.total)}`, `${o.student_name} (${o.flat}) · ${o.files.length} file(s)`);
+  KG.notify(`New order ${o.token} · ${rupeesExact(o.total)}`, `${o.student_name} (${o.flat}) · ${o.files.length} file(s)`, true);
   KG.flashTitle(`🔔 New ${o.token}!`);
   $("#newToken").textContent = o.token;
   $("#newInfo").innerHTML = `<b>${esc(o.student_name)}</b> · ${esc(o.flat)}<br>${o.files.length} file(s) · <b>${rupeesExact(o.total)}</b>`;
