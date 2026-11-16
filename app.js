@@ -91,7 +91,7 @@ function saveDraft() {
         items: items.filter((i) => !i.loading).map((i) => ({
           id: i.id, file: i.file, name: i.name, kind: i.kind, pages: i.pages, total: i.total,
           range: i.range, rangeMode: i.rangeMode, pagesSource: i.pagesSource,
-          copies: i.copies, color: i.color, double: i.double,
+          copies: i.copies, color: i.color, double: i.double && !i.color,
         })),
         shot: shotFile || null,
         utr: $("#fUtr").value, utrAuto: $("#fUtr").dataset.auto || "0",
@@ -455,7 +455,8 @@ function renderItems() {
           <button type="button" data-v="1" class="${it.color ? "on" : ""}">Colour</button></div></div>
         <div><div class="seg" data-f="double">
           <button type="button" data-v="0" class="${!it.double ? "on" : ""}">1-side</button>
-          <button type="button" data-v="1" class="${it.double ? "on" : ""}">2-side</button></div></div>
+          ${it.color ? "" : `<button type="button" data-v="1" class="${it.double ? "on" : ""}">2-side</button>`}</div>
+          ${it.color ? `<small class="muted" style="display:block;font-size:11px;margin-top:2px">Colour is 1-side only</small>` : ""}</div>
         <div class="fprice" data-price></div>
       </div>
       ${it.kind === "image" || it.loading ? "" : `<div class="range-row">
@@ -503,6 +504,7 @@ function onItemClick(e) {
     const f = btn.parentElement.dataset.f;
     if (f === "rangeMode") { it.rangeMode = btn.dataset.v; applyRange(it); }
     else it[f] = btn.dataset.v === "1";
+    if (it.color) it.double = false; // colour prints are single-side only
     renderItems();
     if (f === "rangeMode" && it.rangeMode === "custom") { const inp = $(`.file[data-id="${it.id}"] .range-in`); inp && inp.focus(); }
   }
@@ -591,27 +593,52 @@ function saveQr() {
 
 // Open just the UPI app (its normal home screen) — nothing else.
 // The payment itself happens by scanning the saved QR, which UPI allows.
+// "any" = the phone's own list of every UPI app installed (Navi, BHIM, CRED, …).
 const UPI_APPS = {
   gpay: { name: "GPay", pkg: "com.google.android.apps.nbu.paisa.user", ios: "gpay://" },
   phonepe: { name: "PhonePe", pkg: "com.phonepe.app", ios: "phonepe://" },
   paytm: { name: "Paytm", pkg: "net.one97.paytm", ios: "paytmmp://" },
+  any: { name: "your UPI app" },
 };
 let qrSaved = false;
 function openUpiApp(key) {
   const app = UPI_APPS[key];
   startPaying();
-  if (!qrSaved) toast("Tip: save the payment QR first (step 1), so you can pick it from the gallery.", "warn", 6000);
+  if (!qrSaved && key !== "any") toast("Tip: save the payment QR first (step 1), so you can pick it from the gallery.", "warn", 6000);
   const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
   const isAndroid = /Android/i.test(navigator.userAgent);
   if (!isIOS && !isAndroid) { toast("On a laptop, scan the QR on screen with your phone.", "warn", 6000); return; }
-  location.href = isIOS
-    ? app.ios
-    : `intent:#Intent;action=android.intent.action.MAIN;category=android.intent.category.LAUNCHER;package=${app.pkg};end`;
+  if (key === "any") {
+    // The phone shows every UPI app it has — the student picks one. The amount and
+    // shop are filled in; if that app refuses a link payment, Scan → gallery → saved QR.
+    location.href = upiLink(orderTotal());
+  } else if (isIOS) {
+    location.href = app.ios;
+  } else {
+    // If the app isn't installed, come back to this page (the #noapp hash) instead of the Play Store.
+    const back = location.href.split("#")[0] + "#noapp-" + key;
+    location.href = `intent:#Intent;action=android.intent.action.MAIN;category=android.intent.category.LAUNCHER;package=${app.pkg};S.browser_fallback_url=${encodeURIComponent(back)};end`;
+  }
   // if the app didn't open (not installed / browser blocked it), say what to do
   setTimeout(() => {
-    if (!document.hidden) toast(`Couldn't open ${app.name} from here. Open it yourself → Scan → gallery → pick the saved QR.`, "warn", 9000);
+    if (!document.hidden) noApp(key);
   }, 2500);
 }
+let noAppShown = 0;
+function noApp(key) {
+  if (Date.now() - noAppShown < 4000) return;
+  noAppShown = Date.now();
+  const app = UPI_APPS[key] || UPI_APPS.any;
+  toast(key === "any"
+    ? "Couldn't open a UPI app from here. Open any UPI app yourself → Scan → gallery → pick the saved QR."
+    : `${app.name} isn't on this phone (or the browser blocked it). Tap "Other UPI app", or open any UPI app yourself → Scan → gallery → pick the saved QR.`, "warn", 9000);
+}
+window.addEventListener("hashchange", () => {
+  const m = location.hash.match(/^#noapp-(\w+)/);
+  if (!m) return;
+  history.replaceState(null, "", location.href.split("#")[0]);
+  noApp(m[1]);
+});
 
 // ---------------- leaving to pay → coming back ----------------
 var payingSince = 0;        // when the student started paying (tapped pay / copied)
@@ -852,7 +879,7 @@ async function submitOrder(e) {
         path, name: it.name, kind: it.kind, size: it.file.size,
         pages: it.pages, pages_source: it.pagesSource,
         total_pages: it.total, range: it.kind !== "image" && it.rangeMode === "custom" ? it.range.replace(/\s+/g, "").replace(/,/g, ", ") : null,
-        copies: it.copies, color: it.color, double: it.double,
+        copies: it.copies, color: it.color, double: it.double && !it.color,
       });
     }
 

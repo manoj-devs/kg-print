@@ -11,7 +11,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=20261116a">
+  <link rel="stylesheet" href="styles.css?v=20261116b">
 </head>
 <body>
   <header class="topbar">
@@ -36,8 +36,8 @@
         <p class="lede">Upload your PDF, Word file or photos, pay by UPI, and get a token. Collect your prints when it says <b>Ready</b>.</p>
       </div>
       <ol class="steps">
-        <li><span class="step-no">1</span><div><b>Upload</b><small>PDF, Word (.docx / .doc) or photos. Pick colour, sides and copies.</small></div></li>
-        <li><span class="step-no">2</span><div><b>Pay by UPI</b><small>GPay, PhonePe, Paytm — then enter the 12-digit UTR and screenshot.</small></div></li>
+        <li><span class="step-no">1</span><div><b>Upload</b><small>PDF, Word (.docx / .doc) or photos. Pick colour, sides and copies (colour is 1-side only).</small></div></li>
+        <li><span class="step-no">2</span><div><b>Pay by UPI</b><small>Any UPI app (GPay, PhonePe, Paytm, Navi, BHIM…) — then enter the 12-digit UTR and screenshot.</small></div></li>
         <li><span class="step-no">3</span><div><b>Get your token</b><small>Show your KG token at the shop when the status says Ready.</small></div></li>
       </ol>
       <button id="googleBtn" class="btn gbtn block">
@@ -92,6 +92,7 @@
                   <button type="button" class="btn app-btn" data-app="gpay"><span class="app-dot" style="background:#1a73e8">G</span>GPay</button>
                   <button type="button" class="btn app-btn" data-app="phonepe"><span class="app-dot" style="background:#5f259f">Pe</span>PhonePe</button>
                   <button type="button" class="btn app-btn" data-app="paytm"><span class="app-dot" style="background:#00baf2">P</span>Paytm</button>
+                  <button type="button" class="btn app-btn" data-app="any"><span class="app-dot" style="background:#3b3b44">₹</span>Other UPI app</button>
                 </div>
                 <div class="pay-step"><span class="step-mini">3</span>
                   <span style="font-size:14px">In the app: <b>Scan</b> → <b>gallery / photo icon</b> → pick the saved QR → check it shows <b id="manualAmt"></b> → pay.</span>
@@ -166,8 +167,8 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js" defer></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js" defer></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js" defer></script>
-  <script src="config.js?v=20261116a" defer></script>
-  <script src="common.js?v=20261116a" defer></script>
-  <script src="app.js?v=20261116a" defer></script>
+  <script src="config.js?v=20261116b" defer></script>
+  <script src="common.js?v=20261116b" defer></script>
+  <script src="app.js?v=20261116b" defer></script>
 </body>
 </html>

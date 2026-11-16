@@ -854,9 +854,16 @@
     { name: "Amazon Pay", id: /amazon\s*pay/i, marks: [/success/i, /bank\s*reference|upi\s*ref|\butr\b/i] },
     { name: "CRED", id: /\bcred\b/i, marks: [/success|paid/i, /\b(utr|ref|rrn)\b/i] },
   ];
-  function layoutCheck(text) {
-    const app = APPS.find((a) => a.id.test(text)) || null;
-    const marks = app ? app.marks.filter((m) => m.test(text)).length : 0;
+  function layoutCheck(text, s) {
+    // The shop's UPI ID (paytmqr…@ptys) shows on EVERY app's screen — ignore it,
+    // or a GPay / Navi screenshot would be taken for Paytm.
+    let t = text.replace(/\S*@\S+/g, " ");
+    if (s && s.upi_id) t = t.split(s.upi_id).join(" ");
+    // more than one app name seen → take the one whose "payment done" details match best
+    const found = APPS.filter((a) => a.id.test(t)).map((a) => ({ a, n: a.marks.filter((m) => m.test(t)).length }));
+    found.sort((x, y) => y.n - x.n);
+    const app = found.length ? found[0].a : null;
+    const marks = found.length ? found[0].n : 0;
     const anySuccess = /\b(success|successful|successfully|completed|paid|sent|received|debited)\b/i.test(text);
     const refWord = /\b(ref|utr|rrn|upi|transaction|txn)\b/i.test(text);
     return { app: app ? app.name : null, appMarks: marks, layoutOk: app ? marks >= 1 : (anySuccess || refWord) ? null : false };
@@ -875,7 +882,7 @@
       success: /\b(success|successful|completed|paid)\b/i.test(text),
       ...timeCheck(text, ctx.when),
       ...statusCheck(ctx.statusTime, text, ctx.when),
-      ...layoutCheck(text),
+      ...layoutCheck(text, ctx.settings),
       ...meta,
     };
     const fz = ctx.forensic || null;

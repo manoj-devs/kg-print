@@ -457,7 +457,7 @@ async function saveSettings(e) {
     upi_id: upi,
     payee_name: f.payee_name.value.trim(),
     bw_single: +f.bw_single.value, bw_double: +f.bw_double.value,
-    color_single: +f.color_single.value, color_double: +f.color_double.value,
+    color_single: +f.color_single.value, color_double: +f.color_single.value, // colour is 1-side only
     notice: f.notice.value.trim(),
   };
 

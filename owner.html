@@ -11,8 +11,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=20261116a">
-  <link rel="stylesheet" href="owner.css?v=20261116a">
+  <link rel="stylesheet" href="styles.css?v=20261116b">
+  <link rel="stylesheet" href="owner.css?v=20261116b">
 </head>
 <body>
   <header class="topbar">
@@ -201,7 +201,8 @@
         <label class="field"><span>B/W · single side ₹</span><input type="number" name="bw_single" step="0.25" min="0" required></label>
         <label class="field"><span>B/W · both sides ₹</span><input type="number" name="bw_double" step="0.25" min="0" required></label>
         <label class="field"><span>Colour · single side ₹</span><input type="number" name="color_single" step="0.25" min="0" required></label>
-        <label class="field"><span>Colour · both sides ₹</span><input type="number" name="color_double" step="0.25" min="0" required></label>
+        <input type="hidden" name="color_double">
+        <p class="hint" style="grid-column:1/-1;margin:0">Colour is single-side only — students can't pick colour both sides.</p>
       </div>
       <label class="field"><span>Notice for students (optional)</span><input type="text" name="notice" maxlength="200" placeholder="e.g. Shop closes at 9 PM today"></label>
       <div class="row" style="justify-content:flex-end">
@@ -220,8 +221,8 @@
   <div id="toasts"></div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
-  <script src="config.js?v=20261116a"></script>
-  <script src="common.js?v=20261116a"></script>
-  <script src="owner.js?v=20261116a"></script>
+  <script src="config.js?v=20261116b"></script>
+  <script src="common.js?v=20261116b"></script>
+  <script src="owner.js?v=20261116b"></script>
 </body>
 </html>
