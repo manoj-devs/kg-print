@@ -597,7 +597,7 @@ function saveQr() {
 const UPI_APPS = {
   gpay: { name: "GPay", pkg: "com.google.android.apps.nbu.paisa.user", scheme: "gpay", ios: "gpay://" },
   phonepe: { name: "PhonePe", pkg: "com.phonepe.app", scheme: "phonepe", ios: "phonepe://" },
-  paytm: { name: "Paytm", pkg: "net.one97.paytm", scheme: "paytmmp", ios: "paytmmp://" },
+  paytm: { name: "Paytm", pkg: "net.one97.paytm", scheme: "paytmmp", path: "cash_wallet?featuretype=money_transfer", ios: "paytmmp://cash_wallet?featuretype=money_transfer" },
   navi: { name: "Navi", pkg: "com.naviapp" },
   bhim: { name: "BHIM", pkg: "in.org.npci.upiapp" },
   cred: { name: "CRED", pkg: "com.dreamplug.androidapp", scheme: "credpay", ios: "credpay://" },
@@ -629,7 +629,7 @@ function openUpiApp(key) {
     const back = location.href.split("#")[0] + "#noapp-" + key;
     const fb = `S.browser_fallback_url=${encodeURIComponent(back)}`;
     location.href = app.scheme
-      ? `intent://home#Intent;scheme=${app.scheme};package=${app.pkg};${fb};end`
+      ? `intent://${app.path || ""}#Intent;scheme=${app.scheme};package=${app.pkg};${fb};end`
       : `intent:#Intent;action=android.intent.action.MAIN;category=android.intent.category.LAUNCHER;package=${app.pkg};${fb};end`;
   }
   // if the app didn't open (not installed / browser blocked it), say what to do
