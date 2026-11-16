@@ -11,7 +11,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=20261116b">
+  <link rel="stylesheet" href="styles.css?v=20261116c">
 </head>
 <body>
   <header class="topbar">
@@ -94,6 +94,13 @@
                   <button type="button" class="btn app-btn" data-app="paytm"><span class="app-dot" style="background:#00baf2">P</span>Paytm</button>
                   <button type="button" class="btn app-btn" data-app="any"><span class="app-dot" style="background:#3b3b44">₹</span>Other UPI app</button>
                 </div>
+                <div class="app-btns" id="moreApps" style="margin-left:34px" hidden>
+                  <button type="button" class="btn app-btn" data-app="navi"><span class="app-dot" style="background:#0f7b5f">N</span>Navi</button>
+                  <button type="button" class="btn app-btn" data-app="bhim"><span class="app-dot" style="background:#e8711c">B</span>BHIM</button>
+                  <button type="button" class="btn app-btn" data-app="cred"><span class="app-dot" style="background:#111">C</span>CRED</button>
+                  <button type="button" class="btn app-btn" data-app="amazon"><span class="app-dot" style="background:#ff9900">a</span>Amazon Pay</button>
+                  <button type="button" class="btn app-btn" data-app="mobikwik"><span class="app-dot" style="background:#1565c0">M</span>MobiKwik</button>
+                </div>
                 <div class="pay-step"><span class="step-mini">3</span>
                   <span style="font-size:14px">In the app: <b>Scan</b> → <b>gallery / photo icon</b> → pick the saved QR → check it shows <b id="manualAmt"></b> → pay.</span>
                 </div>
@@ -105,7 +112,6 @@
                   <p class="hint">Pay to UPI ID (may not work for every shop account):</p>
                   <div class="upi-id"><span class="grow" id="upiIdText"></span><button type="button" class="btn small" id="copyUpi">Copy</button></div>
                   <div class="upi-id" style="margin-top:6px"><span class="grow">Amount <b id="manualAmt2"></b></span><button type="button" class="btn small" id="copyAmt">Copy</button></div>
-                  <a id="upiBtn" class="btn small block" style="margin-top:8px" href="#">Open UPI app with amount <span id="upiBtnAmt"></span></a>
                 </details>
               </div>
               <div class="qrbox">
@@ -167,8 +173,8 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js" defer></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js" defer></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js" defer></script>
-  <script src="config.js?v=20261116b" defer></script>
-  <script src="common.js?v=20261116b" defer></script>
-  <script src="app.js?v=20261116b" defer></script>
+  <script src="config.js?v=20261116c" defer></script>
+  <script src="common.js?v=20261116c" defer></script>
+  <script src="app.js?v=20261116c" defer></script>
 </body>
 </html>

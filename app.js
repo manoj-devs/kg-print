@@ -289,7 +289,6 @@ function wireStaticEvents() {
     try { await navigator.clipboard.writeText(v); toast(`Amount ${v} copied`, "ok", 2000); } catch (e) { toast(v); }
     startPaying();
   };
-  $("#upiBtn").addEventListener("click", startPaying);
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) { if (payingSince) leftForPayment = true; return; }
     if (leftForPayment) welcomeBack();
@@ -534,7 +533,6 @@ function updateTotals() {
   const total = orderTotal();
   const paise = getPaise();
   $("#totalAmt").textContent = rupeesExact(total);
-  $("#upiBtnAmt").textContent = rupeesExact(total);
   $("#manualAmt").textContent = rupeesExact(total);
   $("#manualAmt2").textContent = rupeesExact(total);
   $("#upiIdText").textContent = settings.upi_id;
@@ -542,7 +540,6 @@ function updateTotals() {
   showShotStatus();
 
   const upi = upiLink(total);
-  $("#upiBtn").href = upi;
   if (upi !== lastQrText && window.QRCode) {
     lastQrText = upi;
     const box = $("#qr");
@@ -598,21 +595,31 @@ const UPI_APPS = {
   gpay: { name: "GPay", pkg: "com.google.android.apps.nbu.paisa.user", ios: "gpay://" },
   phonepe: { name: "PhonePe", pkg: "com.phonepe.app", ios: "phonepe://" },
   paytm: { name: "Paytm", pkg: "net.one97.paytm", ios: "paytmmp://" },
+  navi: { name: "Navi", pkg: "com.naviapp" },
+  bhim: { name: "BHIM", pkg: "in.org.npci.upiapp" },
+  cred: { name: "CRED", pkg: "com.dreamplug.androidapp" },
+  amazon: { name: "Amazon Pay", pkg: "in.amazon.mShop.android.shopping" },
+  mobikwik: { name: "MobiKwik", pkg: "com.mobikwik_new" },
   any: { name: "your UPI app" },
 };
 let qrSaved = false;
+// NOTE: we never start the payment with a upi://pay link — UPI apps (Paytm etc.)
+// decline those "as per UPI risk policy". The buttons only OPEN the app;
+// the student pays by Scan → gallery → the saved QR, which is always allowed.
 function openUpiApp(key) {
+  if (key === "any") { // show the extra app buttons
+    const more = $("#moreApps"); more.hidden = !more.hidden;
+    if (!more.hidden) toast("Pick your app below. Not in the list? Open it yourself → Scan → gallery → pick the saved QR.", "info", 7000);
+    return;
+  }
   const app = UPI_APPS[key];
   startPaying();
-  if (!qrSaved && key !== "any") toast("Tip: save the payment QR first (step 1), so you can pick it from the gallery.", "warn", 6000);
+  if (!qrSaved) toast("Tip: save the payment QR first (step 1), so you can pick it from the gallery.", "warn", 6000);
   const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
   const isAndroid = /Android/i.test(navigator.userAgent);
   if (!isIOS && !isAndroid) { toast("On a laptop, scan the QR on screen with your phone.", "warn", 6000); return; }
-  if (key === "any") {
-    // The phone shows every UPI app it has — the student picks one. The amount and
-    // shop are filled in; if that app refuses a link payment, Scan → gallery → saved QR.
-    location.href = upiLink(orderTotal());
-  } else if (isIOS) {
+  if (isIOS) {
+    if (!app.ios) { toast(`Open ${app.name} yourself → Scan → gallery → pick the saved QR.`, "warn", 8000); return; }
     location.href = app.ios;
   } else {
     // If the app isn't installed, come back to this page (the #noapp hash) instead of the Play Store.
@@ -629,9 +636,7 @@ function noApp(key) {
   if (Date.now() - noAppShown < 4000) return;
   noAppShown = Date.now();
   const app = UPI_APPS[key] || UPI_APPS.any;
-  toast(key === "any"
-    ? "Couldn't open a UPI app from here. Open any UPI app yourself → Scan → gallery → pick the saved QR."
-    : `${app.name} isn't on this phone (or the browser blocked it). Tap "Other UPI app", or open any UPI app yourself → Scan → gallery → pick the saved QR.`, "warn", 9000);
+  toast(`${app.name} isn't on this phone (or the browser blocked it). Try another app button, or open your UPI app yourself → Scan → gallery → pick the saved QR.`, "warn", 9000);
 }
 window.addEventListener("hashchange", () => {
   const m = location.hash.match(/^#noapp-(\w+)/);
