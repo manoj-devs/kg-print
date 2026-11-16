@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex">
+<title>KG Print - Launch self-test</title>
+<style>
+:root{--ok:#047857;--okbg:#ecfdf5;--bad:#b91c1c;--badbg:#fef2f2;--warn:#b45309;--warnbg:#fffbeb;--ink:#111827;--mut:#64748b}
+body{margin:0;font:15px/1.5 system-ui,Segoe UI,Roboto,sans-serif;background:#f4f6fb;color:var(--ink)}
+main{max-width:860px;margin:0 auto;padding:18px 16px 60px}h1{font-size:22px;margin:4px 0}p{margin:6px 0}
+button{font:inherit;font-weight:600;border:0;border-radius:9px;padding:10px 16px;background:#1f3a5f;color:#fff;cursor:pointer}
+button:disabled{opacity:.5}.sec{background:#fff;border-radius:12px;padding:12px 14px;margin:12px 0;box-shadow:0 1px 3px #0002}
+.sec h2{font-size:16px;margin:0 0 6px}.row{display:grid;grid-template-columns:62px 1fr;gap:8px;padding:6px 0;border-top:1px solid #eef1f5}
+.row:first-of-type{border-top:0}.tag{font-size:12px;font-weight:700;border-radius:6px;padding:2px 0;text-align:center;height:fit-content}
+.PASS{background:var(--okbg);color:var(--ok)}.FAIL{background:var(--badbg);color:var(--bad)}.WARN{background:var(--warnbg);color:var(--warn)}.INFO{background:#eef2ff;color:#3730a3}
+.d{color:var(--mut);font-size:13px}#sum{font-weight:700;font-size:17px}textarea{width:100%;height:120px;font:12px monospace}
+</style></head><body><main>
+<h1>KG Print - launch self-test</h1>
+<p>Checks the <b>live</b> website and database from this browser. It only <b>reads</b> data and tries a few actions that <b>must be refused</b>: it never creates orders or changes anything. Takes about 1 minute.</p>
+<p><label>Simulated students for the traffic test: <select id="n"><option>50</option><option selected>100</option><option>200</option></select></label>
+&nbsp;<button id="go">Run all tests</button></p>
+<p id="sum"></p>
+<div id="out"></div>
+<div class="sec" id="copybox" hidden><h2>Send these results</h2><p class="d">Copy and paste into the chat if anything is red or yellow.</p><textarea id="txt"></textarea></div>
+</main>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="config.js?v=selftest"></script>
+<script>
+const EXPECT = { upi: "paytmqr72bcup@ptys", payee: "BOLLEBOINA ANIL KUMAR", version: "20261116a" };
+const results = []; let cur;
+const $ = (s) => document.querySelector(s);
+function section(t) { cur = document.createElement("div"); cur.className = "sec"; cur.innerHTML = `<h2>${t}</h2>`; $("#out").appendChild(cur); results.push(`\n## ${t}`); }
+function row(st, name, detail = "") {
+  const r = document.createElement("div"); r.className = "row";
+  r.innerHTML = `<span class="tag ${st}">${st}</span><span><b>${name}</b>${detail ? `<br><span class="d">${detail}</span>` : ""}</span>`;
+  cur.appendChild(r); results.push(`[${st}] ${name}${detail ? " - " + detail : ""}`);
+}
+const ms = (t) => `${Math.round(t)} ms`;
+const pct = (a, p) => a.slice().sort((x, y) => x - y)[Math.min(a.length - 1, Math.floor(a.length * p))];
+
+async function run() {
+  $("#go").disabled = true; $("#out").innerHTML = ""; results.length = 0; $("#sum").textContent = "Running...";
+  const C = window.KG_CONFIG || {};
+  // fresh, logged-out client = what an outsider / attacker sees
+  const sb = supabase.createClient(C.SUPABASE_URL, C.SUPABASE_ANON_KEY, { auth: { persistSession: false, autoRefreshToken: false } });
+
+  // ---------- 1 configuration ----------
+  section("1. Shop configuration (live database)");
+  if (!C.SUPABASE_URL || !C.SUPABASE_ANON_KEY) row("FAIL", "config.js", "Supabase URL or key missing");
+  else if (/service_role|sb_secret/.test(C.SUPABASE_ANON_KEY)) row("FAIL", "config.js uses a SECRET key", "Replace it with the publishable/anon key immediately");
+  else row("PASS", "config.js has the public (publishable) key");
+  try {
+    const t0 = performance.now();
+    const { data, error } = await sb.from("settings").select("*").eq("id", 1).single();
+    if (error) throw error;
+    row("PASS", "Database reachable", ms(performance.now() - t0));
+    row(data.upi_id === EXPECT.upi ? "PASS" : "FAIL", "UPI ID = " + data.upi_id, data.upi_id === EXPECT.upi ? "matches Paytm Business" : "expected " + EXPECT.upi);
+    row(data.payee_name === EXPECT.payee ? "PASS" : "FAIL", "Name on UPI account = " + data.payee_name, "must match the name shown in the UPI app");
+    row(data.shop_open ? "PASS" : "WARN", "Shop is " + (data.shop_open ? "OPEN" : "CLOSED"), data.shop_open ? "" : "students cannot order until the owner switches it on");
+    row("INFO", "Rates per page", `B/W ₹${data.bw_single} (both sides ₹${data.bw_double}) · Colour ₹${data.color_single} (both sides ₹${data.color_double})`);
+    row("INFO", "Shop name / notice", `${data.shop_name}${data.notice ? " · " + data.notice : ""}`);
+  } catch (e) { row("FAIL", "Could not read settings", e.message); }
+
+  // ---------- 2 security ----------
+  section("2. Security - what an outsider can do (must all be refused)");
+  const empty = async (label, q) => { try { const { data, error } = await q; if (error) return row("PASS", label, "refused: " + error.message.slice(0, 70));
+      row(data && data.length ? "FAIL" : "PASS", label, data && data.length ? `LEAK: ${data.length} rows visible` : "0 rows visible"); } catch (e) { row("PASS", label, "refused"); } };
+  await empty("Read all orders (names, phones, UTRs)", sb.from("orders").select("token,student_name,phone").limit(5));
+  await empty("Read owner emails", sb.from("owners").select("email"));
+  await empty("Read blocked students", sb.from("blocked_users").select("email"));
+  await empty("Read secret key table", sb.from("kg_private").select("*"));
+  await empty("Read daily token counter", sb.from("daily_counters").select("*"));
+  for (const b of ["prints", "payments"]) {
+    try { const { data, error } = await sb.storage.from(b).list("", { limit: 5 });
+      row(!error && data && data.length ? "FAIL" : "PASS", `List files in "${b}" bucket`, !error && data && data.length ? `LEAK: ${data.length} items` : "nothing visible"); }
+    catch (e) { row("PASS", `List files in "${b}" bucket`, "refused"); }
+  }
+  try { const { error } = await sb.from("orders").insert({ student_name: "selftest", phone: "9999999999", flat: "x", files: [], utr: "000000000000", screenshot_path: "x/p.png", screenshot_sha256: "0".repeat(64), paise: 5 });
+    row(error ? "PASS" : "FAIL", "Create an order without logging in", error ? "refused: " + error.message.slice(0, 70) : "WAS ACCEPTED - check orders table"); } catch (e) { row("PASS", "Create an order without logging in", "refused"); }
+  try { // writes the SAME value back, so nothing can change even if security were broken; only checks whether a write was allowed
+    const { data: cur } = await sb.from("settings").select("upi_id").eq("id", 1).single();
+    const { data, error } = await sb.from("settings").update({ upi_id: cur ? cur.upi_id : EXPECT.upi }).eq("id", 1).select();
+    const allowed = !error && data && data.length > 0;
+    row(allowed ? "FAIL" : "PASS", "Change the shop UPI ID (payment hijack)", allowed ? "an outsider CAN edit settings - fix the settings policy" : "refused (tested safely, nothing changed)"); } catch (e) { row("PASS", "Change the shop UPI ID", "refused"); }
+  try { const { data, error } = await sb.rpc("get_credit_token"); row(!error && data ? "FAIL" : "PASS", "Get the secret auto-verify key", !error && data ? "LEAK" : "refused / empty"); } catch (e) { row("PASS", "Get the secret auto-verify key", "refused"); }
+  try { const { error } = await sb.rpc("bank_credit", { p_token: "x", p_text: "INR 1.00 credited", p_source: "test" }); row(error ? "PASS" : "WARN", "Old auto-verify endpoint is switched off", error ? "refused (turn-off SQL applied)" : "still callable - run the turn-off SQL"); } catch (e) { row("PASS", "Old auto-verify endpoint is switched off", "refused"); }
+
+  // ---------- 3 website files ----------
+  section("3. Website files (GitHub Pages)");
+  const files = ["index.html", "owner.html", "app.js", "common.js", "owner.js", "styles.css", "owner.css", "img.html", "job.html", "view.html", "sw.js", "manifest.webmanifest", "icon.svg"];
+  const got = {};
+  for (const f of files) {
+    try { const t0 = performance.now(); const r = await fetch(f, { cache: "no-store" }); const txt = await r.text(); got[f] = txt;
+      row(r.ok ? "PASS" : "FAIL", f, `${r.status} · ${(txt.length / 1024).toFixed(1)} kB · ${ms(performance.now() - t0)}`); }
+    catch (e) { row("FAIL", f, e.message); }
+  }
+  const vers = [...new Set(["index.html", "owner.html", "job.html", "view.html"].flatMap((f) => (got[f] || "").match(/v=2026\d+[a-z]?/g) || []))];
+  row(vers.length === 1 && vers[0] === "v=" + EXPECT.version ? "PASS" : "WARN", "Latest version uploaded", vers.length ? "pages use " + vers.join(", ") + (vers.includes("v=" + EXPECT.version) ? "" : " - upload the latest zip") : "no version tags found");
+  row(/autoAlerts/.test(got["owner.js"] || "") ? "PASS" : "WARN", "Auto-on alerts update", /autoAlerts/.test(got["owner.js"] || "") ? "present" : "not uploaded yet");
+  row(/shrinkPhoto/.test(got["app.js"] || "") ? "PASS" : "WARN", "Photo shrinking + low-data update", /shrinkPhoto/.test(got["app.js"] || "") ? "present" : "not uploaded yet");
+  row(location.protocol === "https:" ? "PASS" : "FAIL", "Site served over HTTPS", location.protocol);
+
+  // ---------- 4 traffic ----------
+  const N = +$("#n").value, CONC = 20;
+  section(`4. Traffic test - ${N} students opening the site (${CONC} at a time)`);
+  const lat = [], fails = []; let next = 0; const t0 = performance.now();
+  async function student(i) {
+    const s0 = performance.now();
+    try {
+      const rs = await Promise.all(["index.html", "app.js", "common.js", "styles.css"].map((f) => fetch(f + "?lt=" + i, { cache: "no-store" })));
+      if (rs.some((r) => !r.ok)) throw new Error("file " + rs.find((r) => !r.ok).status);
+      await Promise.all(rs.map((r) => r.arrayBuffer()));
+      const { error } = await sb.from("settings").select("shop_name,upi_id,shop_open").eq("id", 1).single();
+      if (error) throw error;
+      lat.push(performance.now() - s0);
+    } catch (e) { fails.push(e.message); }
+  }
+  await Promise.all(Array.from({ length: CONC }, async () => { while (next < N) await student(next++); }));
+  const wall = (performance.now() - t0) / 1000;
+  const p50 = pct(lat, 0.5), p95 = pct(lat, 0.95);
+  row(fails.length === 0 ? "PASS" : fails.length / N < 0.02 ? "WARN" : "FAIL", `${N - fails.length} of ${N} students loaded the site`, fails.length ? "errors: " + [...new Set(fails)].slice(0, 3).join("; ") : "no errors");
+  row(p95 < 3000 ? "PASS" : p95 < 6000 ? "WARN" : "FAIL", `Load time per student: median ${ms(p50)}, 95% under ${ms(p95)}`, "page files + one database read; includes your own internet speed");
+  row("INFO", `Throughput: ${(N / wall).toFixed(1)} students per second`, `${wall.toFixed(1)} s total from one device - the real servers (GitHub CDN, Supabase) handle far more`);
+
+  // ---------- 5 realtime ----------
+  section("5. Live updates (realtime connection)");
+  try {
+    const st = await new Promise((res) => { const ch = sb.channel("selftest-" + Date.now()).on("postgres_changes", { event: "*", schema: "public", table: "settings" }, () => {})
+      .subscribe((s) => { if (s === "SUBSCRIBED" || s === "CHANNEL_ERROR" || s === "TIMED_OUT") { res(s); sb.removeChannel(ch); } }); setTimeout(() => res("TIMED_OUT"), 10000); });
+    row(st === "SUBSCRIBED" ? "PASS" : "FAIL", "Realtime connection", st === "SUBSCRIBED" ? "connected - status updates and owner alerts will arrive live" : st);
+  } catch (e) { row("FAIL", "Realtime connection", e.message); }
+
+  // ---------- summary ----------
+  const c = (s) => results.filter((r) => r.startsWith(`[${s}]`)).length;
+  const f = c("FAIL"), w = c("WARN");
+  $("#sum").innerHTML = f ? `<span style="color:var(--bad)">❌ ${f} problem(s) to fix, ${w} warning(s)</span>` : w ? `<span style="color:var(--warn)">⚠ All critical checks passed, ${w} warning(s)</span>` : `<span style="color:var(--ok)">✅ All ${c("PASS")} checks passed - ready for the shop owner</span>`;
+  $("#txt").value = `KG Print self-test ${new Date().toLocaleString("en-IN")} · ${navigator.userAgent.split(") ")[0]})\n` + results.join("\n");
+  $("#copybox").hidden = false; $("#go").disabled = false;
+}
+$("#go").onclick = run;
+</script>
+</body></html>
