@@ -591,15 +591,18 @@ function saveQr() {
 // Open just the UPI app (its normal home screen) — nothing else.
 // The payment itself happens by scanning the saved QR, which UPI allows.
 // "any" = the phone's own list of every UPI app installed (Navi, BHIM, CRED, …).
+// `scheme` = the app's own link name. Chrome only lets a website open an app through
+// a link the app accepts from browsers — opening its "home icon" sends people to the
+// Play Store instead. These scheme links open the app itself (no payment details in them).
 const UPI_APPS = {
-  gpay: { name: "GPay", pkg: "com.google.android.apps.nbu.paisa.user", ios: "gpay://" },
-  phonepe: { name: "PhonePe", pkg: "com.phonepe.app", ios: "phonepe://" },
-  paytm: { name: "Paytm", pkg: "net.one97.paytm", ios: "paytmmp://" },
+  gpay: { name: "GPay", pkg: "com.google.android.apps.nbu.paisa.user", scheme: "gpay", ios: "gpay://" },
+  phonepe: { name: "PhonePe", pkg: "com.phonepe.app", scheme: "phonepe", ios: "phonepe://" },
+  paytm: { name: "Paytm", pkg: "net.one97.paytm", scheme: "paytmmp", ios: "paytmmp://" },
   navi: { name: "Navi", pkg: "com.naviapp" },
   bhim: { name: "BHIM", pkg: "in.org.npci.upiapp" },
-  cred: { name: "CRED", pkg: "com.dreamplug.androidapp" },
-  amazon: { name: "Amazon Pay", pkg: "in.amazon.mShop.android.shopping" },
-  mobikwik: { name: "MobiKwik", pkg: "com.mobikwik_new" },
+  cred: { name: "CRED", pkg: "com.dreamplug.androidapp", scheme: "credpay", ios: "credpay://" },
+  amazon: { name: "Amazon Pay", pkg: "in.amazon.mShop.android.shopping", scheme: "amazonpay", ios: "amazonpay://" },
+  mobikwik: { name: "MobiKwik", pkg: "com.mobikwik_new", scheme: "mobikwik", ios: "mobikwik://" },
   any: { name: "your UPI app" },
 };
 let qrSaved = false;
@@ -624,7 +627,10 @@ function openUpiApp(key) {
   } else {
     // If the app isn't installed, come back to this page (the #noapp hash) instead of the Play Store.
     const back = location.href.split("#")[0] + "#noapp-" + key;
-    location.href = `intent:#Intent;action=android.intent.action.MAIN;category=android.intent.category.LAUNCHER;package=${app.pkg};S.browser_fallback_url=${encodeURIComponent(back)};end`;
+    const fb = `S.browser_fallback_url=${encodeURIComponent(back)}`;
+    location.href = app.scheme
+      ? `intent://home#Intent;scheme=${app.scheme};package=${app.pkg};${fb};end`
+      : `intent:#Intent;action=android.intent.action.MAIN;category=android.intent.category.LAUNCHER;package=${app.pkg};${fb};end`;
   }
   // if the app didn't open (not installed / browser blocked it), say what to do
   setTimeout(() => {
