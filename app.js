@@ -596,8 +596,8 @@ function saveQr() {
 // Play Store instead. These scheme links open the app itself (no payment details in them).
 const UPI_APPS = {
   gpay: { name: "GPay", pkg: "com.google.android.apps.nbu.paisa.user", scheme: "gpay", ios: "gpay://" },
-  phonepe: { name: "PhonePe", pkg: "com.phonepe.app", scheme: "phonepe", ios: "phonepe://" },
-  paytm: { name: "Paytm", pkg: "net.one97.paytm", scheme: "paytmmp", path: "cash_wallet?featuretype=money_transfer", ios: "paytmmp://cash_wallet?featuretype=money_transfer" },
+  phonepe: { name: "PhonePe", direct: true, pkg: "com.phonepe.app", scheme: "phonepe", ios: "phonepe://" },
+  paytm: { name: "Paytm", direct: true, pkg: "net.one97.paytm", scheme: "paytmmp", path: "cash_wallet?featuretype=money_transfer", ios: "paytmmp://cash_wallet?featuretype=money_transfer" },
   navi: { name: "Navi", pkg: "com.naviapp" },
   bhim: { name: "BHIM", pkg: "in.org.npci.upiapp" },
   cred: { name: "CRED", pkg: "com.dreamplug.androidapp", scheme: "credpay", ios: "credpay://" },
@@ -617,6 +617,12 @@ function openUpiApp(key) {
   }
   const app = UPI_APPS[key];
   startPaying();
+  // Only PhonePe and Paytm open reliably from a website (tested on a real phone).
+  // For the rest, show clear steps instead of a link that may fail.
+  if (!app.direct) {
+    toast(`Open ${app.name} yourself → tap Scan → gallery / photo icon → pick the saved QR → pay.${qrSaved ? "" : " (Save the payment QR first — step 1.)"}`, "info", 10000);
+    return;
+  }
   if (!qrSaved) toast("Tip: save the payment QR first (step 1), so you can pick it from the gallery.", "warn", 6000);
   const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
   const isAndroid = /Android/i.test(navigator.userAgent);
