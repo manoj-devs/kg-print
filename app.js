@@ -595,9 +595,9 @@ function saveQr() {
 // a link the app accepts from browsers — opening its "home icon" sends people to the
 // Play Store instead. These scheme links open the app itself (no payment details in them).
 const UPI_APPS = {
-  gpay: { name: "GPay", pkg: "com.google.android.apps.nbu.paisa.user", scheme: "gpay", ios: "gpay://" },
+  gpay: { name: "GPay", direct: true, pkg: "com.google.android.apps.nbu.paisa.user", scheme: "tez", ios: "gpay://" },
   phonepe: { name: "PhonePe", direct: true, pkg: "com.phonepe.app", scheme: "phonepe", ios: "phonepe://" },
-  paytm: { name: "Paytm", direct: true, pkg: "net.one97.paytm", scheme: "paytmmp", path: "cash_wallet?featuretype=money_transfer", ios: "paytmmp://cash_wallet?featuretype=money_transfer" },
+  paytm: { name: "Paytm", direct: true, pkg: "net.one97.paytm", scheme: "paytmmp", path: "cash_wallet?featuretype=scanner", ios: "paytmmp://cash_wallet?featuretype=scanner" }, // tested: opens Paytm home, no error
   navi: { name: "Navi", pkg: "com.naviapp" },
   bhim: { name: "BHIM", pkg: "in.org.npci.upiapp" },
   cred: { name: "CRED", pkg: "com.dreamplug.androidapp", scheme: "credpay", ios: "credpay://" },
@@ -617,7 +617,7 @@ function openUpiApp(key) {
   }
   const app = UPI_APPS[key];
   startPaying();
-  // Only PhonePe and Paytm open reliably from a website (tested on a real phone).
+  // Only GPay, PhonePe and Paytm open reliably from a website (tested on a real phone).
   // For the rest, show clear steps instead of a link that may fail.
   if (!app.direct) {
     toast(`Open ${app.name} yourself → tap Scan → gallery / photo icon → pick the saved QR → pay.${qrSaved ? "" : " (Save the payment QR first — step 1.)"}`, "info", 10000);
@@ -638,12 +638,16 @@ function openUpiApp(key) {
       ? `intent://${app.path || ""}#Intent;scheme=${app.scheme};package=${app.pkg};${fb};end`
       : `intent:#Intent;action=android.intent.action.MAIN;category=android.intent.category.LAUNCHER;package=${app.pkg};${fb};end`;
   }
-  // if the app didn't open (not installed / browser blocked it), say what to do
+  // If the app didn't open, say what to do. Some apps take a few seconds to open,
+  // so only complain if the page never went to the background.
+  const tappedAt = Date.now();
   setTimeout(() => {
-    if (!document.hidden) noApp(key);
-  }, 2500);
+    if (!document.hidden && lastHiddenAt < tappedAt) noApp(key);
+  }, 5000);
 }
 let noAppShown = 0;
+let lastHiddenAt = 0;
+document.addEventListener("visibilitychange", () => { if (document.hidden) lastHiddenAt = Date.now(); });
 function noApp(key) {
   if (Date.now() - noAppShown < 4000) return;
   noAppShown = Date.now();
