@@ -679,18 +679,18 @@ function checkChips(o) {
     else if (c.phoneShape === false) chips.push(chip("meh", `Unusual size ${c.w}×${c.h}`, "Real phone screenshots are tall (like 1080×2400). Cropped or made-up images often aren't."));
 
     // pixel checks: pasted patches / odd digits
-    if (c.patches && c.patches.length) chips.push(chip("bad", `✕ Looks edited near the ${esc(c.patches[0].what)} (pasted patch)`, `A faint straight edge was found in the background next to the ${c.patches[0].what} (at x=${c.patches[0].x}, y=${c.patches[0].y}). Real screenshots don't have one. Zoom into the screenshot and look closely.`));
-    if (c.glyphIssues && c.glyphIssues.length) chips.push(chip("bad", `✕ ${esc(c.glyphIssues[0].what)}: ${esc(c.glyphIssues[0].why)}`, "In a real screenshot every digit of a number has the same size, line and colour."));
+    if (c.patches && c.patches.length) chips.push(chip("meh", `⚠ Check: possible edit near the ${esc(c.patches[0].what)}`, `A faint straight edge was found in the background next to the ${c.patches[0].what} (at x=${c.patches[0].x}, y=${c.patches[0].y}). Real screenshots don't have one. Zoom into the screenshot and look closely.`));
+    if (c.glyphIssues && c.glyphIssues.length) chips.push(chip("meh", `⚠ Check ${esc(c.glyphIssues[0].what)}: ${esc(c.glyphIssues[0].why)}`, "In a real screenshot every digit of a number has the same size, line and colour."));
     if (c.v >= 6 && !(c.patches || []).length && !(c.glyphIssues || []).length) chips.push(chip("good", "✓ No edit marks found"));
 
     // the phone clock in the status bar
     if (c.statusOk === true) chips.push(chip("good", `✓ Phone clock ${esc(c.statusSeen)} fits`));
-    else if (c.statusOk === false) chips.push(chip("bad", `✕ Phone clock shows ${esc(c.statusSeen)} — old screenshot?`, "The status-bar clock in the screenshot is not close to the time the order was placed."));
+    else if (c.statusOk === false) chips.push(chip("meh", `⚠ Phone clock shows ${esc(c.statusSeen)} — old screenshot?`, "The status-bar clock in the screenshot is not close to the time the order was placed."));
 
     // looks like the UPI app's success screen?
     if (c.app && c.appMarks) chips.push(chip("good", `✓ Looks like ${esc(c.app)} success screen`));
-    else if (c.app && c.appMarks === 0) chips.push(chip("bad", `✕ Doesn't look like a real ${esc(c.app)} receipt`, "Fake-payment / prank apps often miss details the real app always shows."));
-    else if (c.layoutOk === false) chips.push(chip("bad", "✕ Not a payment-success screen"));
+    else if (c.app && c.appMarks === 0) chips.push(chip("meh", `⚠ Check: unusual ${esc(c.app)} receipt layout`, "Fake-payment / prank apps often miss details the real app always shows."));
+    else if (c.layoutOk === false) chips.push(chip("meh", "⚠ Check: doesn't look like a success screen"));
   }
   const dev = o.student_check && o.student_check.dev;
   if (dev && dev.mobile && c && c.w && dev.w && Math.abs(dev.w - c.w) > 4 && Math.abs(dev.h - c.w) > 4) {

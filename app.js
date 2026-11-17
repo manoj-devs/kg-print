@@ -90,7 +90,7 @@ function saveDraft() {
         user: user.id, savedAt: Date.now(),
         items: items.filter((i) => !i.loading).map((i) => ({
           id: i.id, file: i.file, name: i.name, kind: i.kind, pages: i.pages, total: i.total,
-          range: i.range, rangeMode: i.rangeMode, pagesSource: i.pagesSource,
+          range: i.range, rangeMode: i.rangeMode, pagesSource: i.pagesSource, minPages: i.minPages || 0,
           copies: i.copies, color: i.color, double: i.double && !i.color,
         })),
         shot: shotFile || null,
@@ -240,6 +240,8 @@ function wireStaticEvents() {
 
   const list = $("#fileList");
   list.addEventListener("input", onItemInput);
+  // after typing pages, show the value actually used (never below the counted pages)
+  list.addEventListener("change", (e) => { if (e.target.dataset && e.target.dataset.f === "pages") renderItems(); });
   list.addEventListener("click", onItemClick);
 
   $("#fPhone").addEventListener("input", (e) => {
@@ -339,7 +341,7 @@ function addFiles(fileList) {
     // Copy the file into memory NOW. On phones, the browser loses access to picked
     // files after you switch apps (e.g. to Paytm to pay), so we never read it again later.
     keepInMemory(file)
-      .then((copy) => { it.file = copy; return it.kind === "image" ? shrinkPhoto(copy).then((f) => { it.file = f; it.name = f.name; }) : it.kind === "pdf" || it.kind === "docx" ? countPages(it) : null; })
+      .then((copy) => { it.file = copy; return it.kind === "image" ? shrinkPhoto(copy).then((f) => { it.file = f; it.name = f.name; }) : it.kind === "pdf" || it.kind === "docx" || it.kind === "doc" ? countPages(it) : null; })
       .catch(() => {
         items = items.filter((x) => x !== it);
         toast(`Couldn't read ${file.name}. Please select it again.`, "error", 6000);
@@ -385,17 +387,24 @@ async function countPages(it) {
       it.pagesSource = "auto";
       pdf.destroy();
     } else if (it.kind === "docx") {
-      // Word files have no fixed pages, so we combine two things Word saves:
+      // Word files have no fixed pages. We take the HIGHEST of:
       //  1) the page count Word stored when the file was last saved (docProps/app.xml)
       //  2) the page-break markers Word writes while laying out the text
+      //  3) our own layout: the document is laid out on its real page size in the
+      //     browser and the pages are counted (works for Google Docs / phone files too)
       const zip = await JSZip.loadAsync(buf);
       const app = zip.file("docProps/app.xml") ? await zip.file("docProps/app.xml").async("string") : "";
       const doc = zip.file("word/document.xml") ? await zip.file("word/document.xml").async("string") : "";
       const saved = +((app.match(/<Pages>(\d+)<\/Pages>/) || [])[1] || 0);
       const rendered = (doc.match(/<w:lastRenderedPageBreak\s*\/>/g) || []).length;
       const hard = (doc.match(/<w:br [^>]*w:type="page"[^>]*\/>/g) || []).length + (doc.match(/<w:pageBreakBefore(?:\s*\/>|\s+w:val="(?:1|true|on)")/g) || []).length;
-      const est = Math.max(saved, rendered ? rendered + 1 : 0, hard + 1);
-      if (saved || rendered || hard) { it.total = est; it.pagesSource = "estimate"; }
+      const laid = await docxLayoutPages(buf).catch((e) => { console.warn("layout count failed", e); return 0; });
+      const est = Math.max(saved, rendered ? rendered + 1 : 0, hard ? hard + 1 : 0, laid);
+      if (est) { it.total = est; it.minPages = est; it.pagesSource = "estimate"; }
+      else it.pagesSource = "manual";
+    } else if (it.kind === "doc") {
+      const n = (() => { try { return docPageCount(buf); } catch (e) { return 0; } })();
+      if (n > 0 && n <= 2000) { it.total = n; it.minPages = n; it.pagesSource = "estimate"; }
       else it.pagesSource = "manual";
     }
     applyRange(it);
@@ -403,6 +412,127 @@ async function countPages(it) {
     it.pagesSource = "manual";
     toast(`Couldn't count pages in ${it.name}. Please type the page count.`, "warn", 6000);
   }
+}
+
+// ---- Word layout page count ----
+// Lays the .docx out on its own page size (off-screen) and counts the pages.
+// One file at a time, with a time limit, so a big file can't freeze the phone.
+const DOCX_PREVIEW_URL = "https://cdn.jsdelivr.net/npm/docx-preview@0.3.6/dist/docx-preview.min.js";
+let layoutQueue = Promise.resolve();
+function docxLayoutPages(buf) {
+  const job = layoutQueue.then(() => Promise.race([
+    layoutOnce(buf),
+    new Promise((_, rej) => setTimeout(() => rej(new Error("layout timeout")), 25000)),
+  ]));
+  layoutQueue = job.catch(() => {});
+  return job;
+}
+async function layoutOnce(buf) {
+  if (buf.byteLength > 20 * 1024 * 1024) return 0;      // very big file: use Word's own numbers
+  if (!window.docx) await KG.loadScript(DOCX_PREVIEW_URL);
+  // A sealed box (shadow DOM, styles reset) so the website's own CSS can't change the layout
+  const outer = document.createElement("div");
+  outer.setAttribute("aria-hidden", "true");
+  outer.style.cssText = "all:initial;position:absolute;left:-30000px;top:0;visibility:hidden;pointer-events:none;contain:layout style";
+  document.body.appendChild(outer);
+  const root = outer.attachShadow({ mode: "open" });
+  const styleBox = document.createElement("div");
+  const host = document.createElement("div");
+  root.append(styleBox, host);
+  try {
+    await docx.renderAsync(buf, host, styleBox, {
+      inWrapper: false, breakPages: true, ignoreLastRenderedPageBreak: true,
+      renderHeaders: true, renderFooters: true, renderFootnotes: true, renderEndnotes: true,
+      useBase64URL: false, experimental: true,
+    });
+    const imgs = [...host.querySelectorAll("img")];
+    await Promise.race([
+      Promise.all(imgs.map((i) => (i.complete ? 0 : new Promise((r) => { i.onload = i.onerror = r; })))),
+      new Promise((r) => setTimeout(r, 4000)),
+    ]);
+    // Word's line spacing is a multiple of the FONT's natural line height; the
+    // preview uses a multiple of the font SIZE (≈15–20% shorter). Fix that first.
+    const nat = {};
+    const probe = document.createElement("span");
+    probe.textContent = "Hg";
+    probe.style.cssText = "position:absolute;line-height:normal;white-space:nowrap;font-size:100px";
+    host.appendChild(probe);
+    const factor = (fam) => { if (!nat[fam]) { probe.style.fontFamily = fam; nat[fam] = probe.getBoundingClientRect().height / 100 || 1; } return nat[fam]; };
+    const paras = host.querySelectorAll("article p, article li");
+    const fixes = [];
+    for (const el of paras) {
+      const cs = getComputedStyle(el);
+      if (cs.lineHeight === "normal") continue;
+      const fs = parseFloat(cs.fontSize), lh = parseFloat(cs.lineHeight), mult = lh / fs;
+      if (!(mult >= 0.95 && mult <= 3.2)) continue;      // an exact / "at least" spacing: keep
+      fixes.push([el, lh * factor(cs.fontFamily)]);
+    }
+    for (const [el, v] of fixes) el.style.lineHeight = v + "px";   // write after reading (no layout thrash)
+    probe.remove();
+    let pages = 0;
+    for (const sec of host.querySelectorAll("section.docx")) {
+      const cs = getComputedStyle(sec);
+      const pageH = parseFloat(cs.minHeight) || sec.offsetHeight;
+      const avail = pageH - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom);
+      const art = sec.querySelector("article") || sec;
+      if (!(avail > 100)) continue;
+      // 4% kept free per page: Word moves lines down to keep headings with their text
+      // and to avoid single lines at the top/bottom of a page
+      pages += Math.max(1, Math.ceil((art.scrollHeight - 1) / (avail * 0.96)));
+    }
+    return pages;
+  } finally {
+    host.querySelectorAll("img").forEach((i) => { if (i.src.startsWith("blob:")) URL.revokeObjectURL(i.src); });
+    outer.remove();
+  }
+}
+
+// Page count saved inside an old Word .doc file (OLE "SummaryInformation", property 14).
+// Page count stored inside an old Word .doc (OLE "SummaryInformation", property 14).
+function docPageCount(buf) {
+  const v = new DataView(buf), u8 = new Uint8Array(buf);
+  if (v.getUint32(0, true) !== 0xE011CFD0 || v.getUint32(4, true) !== 0xE11AB1A1) return 0;
+  const secSize = 1 << v.getUint16(30, true), miniSize = 1 << v.getUint16(32, true);
+  const nFat = v.getUint32(44, true), dirStart = v.getUint32(48, true), miniCut = v.getUint32(56, true);
+  const miniFatStart = v.getUint32(60, true), difStart = v.getUint32(68, true), nDif = v.getUint32(72, true);
+  const off = (s) => 512 + s * secSize;
+  const difat = [];
+  for (let i = 0; i < 109 && difat.length < nFat; i++) difat.push(v.getUint32(76 + i * 4, true));
+  let d = difStart;
+  for (let k = 0; k < nDif && d < 0xFFFFFFFA && difat.length < nFat; k++) {
+    for (let i = 0; i < secSize / 4 - 1 && difat.length < nFat; i++) difat.push(v.getUint32(off(d) + i * 4, true));
+    d = v.getUint32(off(d) + secSize - 4, true);
+  }
+  const fat = [];
+  for (const s of difat) for (let i = 0; i < secSize / 4; i++) fat.push(v.getUint32(off(s) + i * 4, true));
+  const chain = (s, max = 100000) => { const out = []; while (s < 0xFFFFFFFA && out.length < max) { out.push(s); s = fat[s]; } return out; };
+  const read = (s, size) => { const out = new Uint8Array(size); let p = 0; for (const c of chain(s)) { const n = Math.min(secSize, size - p); if (n <= 0) break; out.set(u8.subarray(off(c), off(c) + n), p); p += n; } return out; };
+  // directory
+  let root = null, sum = null;
+  for (const ds of chain(dirStart)) for (let e = 0; e < secSize / 128; e++) {
+    const o = off(ds) + e * 128, nl = v.getUint16(o + 64, true);
+    if (nl < 2) continue;
+    let name = ""; for (let i = 0; i < nl / 2 - 1; i++) name += String.fromCharCode(v.getUint16(o + i * 2, true));
+    const ent = { start: v.getUint32(o + 116, true), size: v.getUint32(o + 120, true), type: u8[o + 66] };
+    if (ent.type === 5) root = ent;
+    if (name === "\u0005SummaryInformation") sum = ent;
+  }
+  if (!sum) return 0;
+  let data;
+  if (sum.size < miniCut) {
+    const mini = read(root.start, root.size);
+    const mfat = []; for (const c of chain(miniFatStart)) for (let i = 0; i < secSize / 4; i++) mfat.push(v.getUint32(off(c) + i * 4, true));
+    data = new Uint8Array(sum.size); let p = 0, s = sum.start;
+    while (s < 0xFFFFFFFA && p < sum.size) { const n = Math.min(miniSize, sum.size - p); data.set(mini.subarray(s * miniSize, s * miniSize + n), p); p += n; s = mfat[s]; }
+  } else data = read(sum.start, sum.size);
+  const pv = new DataView(data.buffer);
+  const secOff = pv.getUint32(44, true);
+  const nProps = pv.getUint32(secOff + 4, true);
+  for (let i = 0; i < nProps; i++) {
+    const id = pv.getUint32(secOff + 8 + i * 8, true), po = pv.getUint32(secOff + 12 + i * 8, true);
+    if (id === 14 && pv.getUint16(secOff + po, true) === 3) return pv.getInt32(secOff + po + 4, true);
+  }
+  return 0;
 }
 
 // "1-5, 8, 10-12" → number of pages, checked against the document's page count
@@ -431,7 +561,7 @@ function pagesNote(it) {
   if (it.loading) return `<span class="spinner"></span> counting pages…`;
   if (it.kind === "image") return "Photo · 1 page per copy";
   if (it.pagesSource === "auto") return `${it.total} page${it.total > 1 ? "s" : ""} (counted)`;
-  if (it.pagesSource === "estimate") return `<span class="warn">≈ ${it.total} pages (Word estimate) — please check</span>`;
+  if (it.pagesSource === "estimate") return `<span class="warn">≈ ${it.minPages || it.total} pages (Word count). For the exact count, upload it as PDF.</span>`;
   return `<span class="warn">Enter the number of pages</span>`;
 }
 
@@ -447,7 +577,7 @@ function renderItems() {
         <button type="button" class="icon-btn" data-act="remove" aria-label="Remove">✕</button>
       </div>
       <div class="file-opts">
-        <label>${it.kind === "image" ? "Pages" : "Total pages"}<input type="number" min="1" max="2000" data-f="pages" value="${it.total}" ${locked || it.loading ? "readonly" : ""}></label>
+        <label>${it.kind === "image" ? "Pages" : "Total pages"}<input type="number" min="${it.minPages || 1}" max="2000" data-f="pages" value="${it.total}" ${locked || it.loading ? "readonly" : ""}></label>
         <label>Copies<input type="number" min="1" max="100" data-f="copies" value="${it.copies}"></label>
         <div><div class="seg" data-f="color">
           <button type="button" data-v="0" class="${!it.color ? "on" : ""}">B/W</button>
@@ -478,7 +608,7 @@ function onItemInput(e) {
   if (!row || !el.dataset.f) return;
   const it = items.find((i) => i.id === row.dataset.id);
   const n = parseInt(el.value, 10);
-  if (el.dataset.f === "pages") { it.total = Math.min(2000, Math.max(1, n || 1)); applyRange(it); }
+  if (el.dataset.f === "pages") { it.total = Math.min(2000, Math.max(it.minPages || 1, n || 1)); applyRange(it); }
   if (el.dataset.f === "copies") it.copies = Math.min(100, Math.max(1, n || 1));
   if (el.dataset.f === "range") {
     it.range = el.value;
@@ -877,7 +1007,7 @@ async function submitOrder(e) {
           : `The screenshot doesn't show payment to ${settings.payee_name}. Make sure you paid the shop.`;
         return fail(ocrFails >= 2 ? what + " If your payment is correct, tick the box below to send it to the shop owner." : what, problems.includes("utr") ? "#fUtr" : "#fShot");
       }
-      studentCheck = { utr: r.utr, amount: r.amount, payee: r.payee, override: problems.length > 0, missing: problems, utrSeen: r.utrSeen || null, dev: devScreen() };
+      studentCheck = { utr: r.utr, amount: r.amount, payee: r.payee, override: problems.length > 0, missing: problems, warn: r.warn || [], utrSeen: r.utrSeen || null, dev: devScreen() };
     }
 
     setBusy("Checking payment details…");
@@ -898,7 +1028,7 @@ async function submitOrder(e) {
       uploaded.push(["prints", path]);
       files.push({
         path, name: it.name, kind: it.kind, size: it.file.size,
-        pages: it.pages, pages_source: it.pagesSource,
+        pages: it.pages, pages_source: it.pagesSource, pages_counted: it.minPages || null,
         total_pages: it.total, range: it.kind !== "image" && it.rangeMode === "custom" ? it.range.replace(/\s+/g, "").replace(/,/g, ", ") : null,
         copies: it.copies, color: it.color, double: it.double && !it.color,
       });

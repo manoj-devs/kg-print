@@ -377,8 +377,10 @@
       const nSym = (w.symbols || []).length;
       const isUtr = d.length >= 10 && d.length <= 13 && nSym >= 11 && nSym <= 13; // a UTR (maybe with one odd-looking digit)
       const isAmt = main && main.bbox && w.bbox && w.bbox.y0 >= main.bbox.y0 - 4 && w.bbox.y1 <= main.bbox.y1 + 4 && d.length >= 2;
-      if (!isUtr && !isAmt) continue;
-      const issue = glyphCheck(w, isUtr ? "UTR" : "amount");
+      // Only the UTR is checked: in the amount, the "₹" sign and the smaller paise
+      // that many apps draw (GPay, Paytm) look like "odd digits" in REAL screenshots.
+      if (!isUtr) continue;
+      const issue = glyphCheck(w, "UTR");
       if (issue) glyphIssues.push(issue);
     }
     return { patches, glyphIssues, checked: targets.length };
@@ -645,11 +647,13 @@
   const RUPEE_MISREADS = "12347";
   function readAmounts(text) {
     const out = [];
-    for (const m of text.matchAll(/(?<![\d.\/:-])(\d{1,3}(?:,\d{3})+|\d{1,7})\.(\d{2})(?![\d.\/-])/g)) {
+    // "62.37", and also "4.5" (PhonePe drops the last zero: ₹4.5 = ₹4.50)
+    for (const m of text.matchAll(/(?<![\d.\/:-])(\d{1,3}(?:,\d{3})+|\d{1,7})\.(\d{1,2})(?![\d.\/-])/g)) {
       const intPart = m[1].replace(/,/g, "");
-      const vals = [Math.round(Number(intPart + "." + m[2]) * 100)];
+      const paise = m[2].length === 1 ? m[2] + "0" : m[2];
+      const vals = [Math.round(Number(intPart + "." + paise) * 100)];
       if (intPart.length >= 2 && RUPEE_MISREADS.includes(intPart[0])) {
-        vals.push(Math.round(Number(intPart.slice(1) + "." + m[2]) * 100));
+        vals.push(Math.round(Number(intPart.slice(1) + "." + paise) * 100));
       }
       out.push(vals);
     }
@@ -700,7 +704,7 @@
       timeOk = times.some((t) => t.mins.some((x) => {
         let d = orderMin - x;
         if (d < -720) d += 1440; // payment just before midnight
-        return d >= -5 && d <= 45;
+        return d >= -5 && d <= 120; // paid up to 2 hours before ordering
       }));
     }
     // dates like "5 Nov 2026", "Nov 5, 2026", "05/11/2026"
@@ -723,6 +727,8 @@
   // Possible amounts (in paise) in one line of text, allowing for "₹" read as a digit
   // and for the paise printed small / without a clear dot (Paytm: ₹2.58 -> "2 58").
   function amountsInLine(t) {
+    // drop UPI IDs (paytmqr72bcup@ptys) and words with digits inside (txn ids, "72bcup")
+    t = (t || "").split(/\s+/).filter((w) => !/@/.test(w) && !/[a-z]{2,}\d|\d[a-z]{2,}/i.test(w.replace(/^(rs|inr)\.?/i, ""))).join(" ");
     const s = t.replace(/[Oo]/g, "0").replace(/[Il|]/g, "1").replace(/\s+/g, "");
     const out = new Set();
     const add = (i, p) => {
@@ -735,6 +741,8 @@
     };
     let m = s.match(/(\d[\d,]*)[.,·:](\d{2})(?!\d)/);
     if (m) { add(m[1].replace(/,/g, ""), m[2]); return [...out]; }
+    m = s.match(/(\d[\d,]*)\.(\d)(?!\d)/);              // "4.5" = 4.50
+    if (m) { add(m[1].replace(/,/g, ""), m[2] + "0"); return [...out]; }
     m = s.match(/\d[\d,]*/);
     if (m) {
       const d = m[0].replace(/,/g, "");
@@ -761,11 +769,11 @@
 
   function amountsFromDigits(t) {
     const out = new Set();
-    const m = (t || "").replace(/\s+/g, "").match(/(\d+)[.,](\d{2})/);
+    const m = (t || "").replace(/\s+/g, "").match(/(\d+)[.,](\d{1,2})(?!\d)/);
     if (!m) return [];
-    const i = m[1];
-    out.add(Math.round(Number(i + "." + m[2]) * 100));
-    if (i.length >= 2 && RUPEE_MISREADS.includes(i[0])) out.add(Math.round(Number(i.slice(1) + "." + m[2]) * 100));
+    const i = m[1], p = m[2].length === 1 ? m[2] + "0" : m[2];
+    out.add(Math.round(Number(i + "." + p) * 100));
+    if (i.length >= 2 && RUPEE_MISREADS.includes(i[0])) out.add(Math.round(Number(i.slice(1) + "." + p) * 100));
     return [...out].filter((v) => v > 0);
   }
 
@@ -913,16 +921,19 @@
     if (readable && r.dateOld) add("date", false, `The screenshot is from ${r.dateSeen}. Upload the screenshot of today's payment.`);
     if (r.tooSmall) add("small", false, `The image is too small (${r.w}×${r.h}) — it was resized or forwarded. Upload the original screenshot from your phone's gallery.`);
     if (readable && r.timeOk === false) add("time", false, `The time in the screenshot (${r.timeSeen.join(", ")}) doesn't match this order. Take a fresh screenshot right after paying.`);
-    if (readable && r.statusOk === false) add("status", false, `The phone clock in this screenshot shows ${r.statusSeen} — it wasn't taken just now. Pay for this order and take a fresh screenshot.`);
-    if (readable && r.patches.length) add("patch", false, `The ${r.patches[0].what} area of this screenshot looks edited (a pasted patch). Upload the original screenshot from your UPI app, without editing.`);
-    if (readable && r.glyphIssues.length) add("glyph", false, `This screenshot looks edited: in the ${r.glyphIssues[0].what}, ${r.glyphIssues[0].why}. Upload the original screenshot from your UPI app, without editing.`);
-    if (readable && !r.app && r.layoutOk === false) add("layout", false, "This doesn't look like a UPI payment-success screen. Upload the screenshot of the success page (it shows the amount, the date/time and the UPI Ref No.).");
-    if (readable && r.app && r.appMarks === 0) add("layout", false, `This doesn't look like a real ${r.app} payment-success screen. Upload the original screenshot of the success page.`);
+    // These pixel / layout / clock checks can misfire on REAL screenshots (dark mode,
+    // new app designs, Navi/BHIM…), so they never block a student — they only warn
+    // the owner, who confirms the money in his UPI app anyway.
+    const warn = [];
+    if (readable && r.statusOk === false) warn.push("status");
+    if (readable && r.patches.length) warn.push("patch");
+    if (readable && r.glyphIssues.length) warn.push("glyph");
+    if (readable && ((!r.app && r.layoutOk === false) || (r.app && r.appMarks === 0))) warn.push("layout");
     const soft = [];
     if (!r.utr && !r.utrSeen) soft.push("utr");
     if (!r.amount && !sureWrong) soft.push("amount");
     if (r.payee === false) soft.push("payee");
-    return { ...r, hard, soft };
+    return { ...r, hard, soft, warn };
   }
 
   // open = the owner's Open/Closed switch
@@ -930,6 +941,20 @@
     if (!s) return { open: false, reason: "loading" };
     return s.shop_open ? { open: true } : { open: false, reason: "off" };
   }
+
+  // Safety net: an unexpected error never leaves the page silently stuck.
+  // (The student's order draft is saved on the phone, so a reload loses nothing.)
+  let lastCrashToast = 0;
+  function onCrash(msg) {
+    msg = String(msg || "");
+    if (!msg || /Script error|ResizeObserver|extension|AbortError|NotAllowedError|play\(\)/i.test(msg)) return;
+    console.error("Unexpected error:", msg);
+    if (Date.now() - lastCrashToast < 30000) return;
+    lastCrashToast = Date.now();
+    try { toast("Something went wrong. Your order is saved on this phone — if a button stops working, reload the page.", "warn", 8000); } catch (e) { /* ignore */ }
+  }
+  window.addEventListener("error", (e) => onCrash(e && (e.message || (e.error && e.error.message))));
+  window.addEventListener("unhandledrejection", (e) => onCrash(e && e.reason && (e.reason.message || e.reason)));
 
   window.KG = {
     shopState,
