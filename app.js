@@ -482,7 +482,7 @@ function pagesNote(it) {
   if (it.kind === "image") return "Photo · 1 page per copy";
   if (it.pagesSource === "auto") return `${it.total} page${it.total > 1 ? "s" : ""} (counted)`;
   if (it.pagesSource === "word") return `${it.total} page${it.total > 1 ? "s" : ""} (Word's own page count)`;
-  return `<span class="warn">✕ Couldn't count the pages of this file. Save it as PDF and upload the PDF instead.</span>`;
+  return `<span class="warn">✕ This file has no page count saved in it. Open it in Word or WPS, press Save (Ctrl+S) and upload it again — or upload it as PDF.</span>`;
 }
 
 function renderItems() {
@@ -589,7 +589,7 @@ function updateTotals() {
     $("#payCard").before(block);
   }
   block.hidden = !uncounted.length;
-  if (uncounted.length) block.innerHTML = `✕ <b>${esc(uncounted[0].name)}</b>: we couldn't count its pages, so the price can't be worked out. Remove it (✕) and upload it as <b>PDF</b> (Word → File → Save As → PDF, or Google Docs → Download → PDF). <b>Don't pay yet.</b>`;
+  if (uncounted.length) block.innerHTML = `✕ <b>${esc(uncounted[0].name)}</b> has no page count saved in it (it was made by an app or website, not saved in Word), so the price can't be worked out. <b>Don't pay yet.</b><br>Fix: open it in <b>Word or WPS</b> (phone or laptop) → press <b>Save</b> → remove it here (✕) and upload it again. Or upload it as <b>PDF</b>.`;
   if (!show) return;
 
   const total = orderTotal();
@@ -934,7 +934,7 @@ async function submitOrder(e) {
   if (!items.length) return fail("Add at least one file to print");
   if (items.some((i) => i.loading)) return fail("Wait — still counting pages");
   const uncounted = items.find((i) => i.pagesSource === "manual");
-  if (uncounted) return fail(`${uncounted.name}: we couldn't count its pages. Save it as PDF (Word → File → Save As → PDF) and upload the PDF instead.`);
+  if (uncounted) return fail(`${uncounted.name} has no page count saved in it. Open it in Word or WPS, press Save and upload it again — or upload it as PDF.`);
   const badRange = items.find((i) => i.rangeMode === "custom" && i.rangeErr);
   if (badRange) return fail(`${badRange.name}: ${badRange.rangeErr}`);
   if (utr && !/^\d{12}$/.test(utr)) return fail("The UTR must be exactly 12 digits — or leave the box empty", "#fUtr");
