@@ -595,8 +595,8 @@ function saveQr() {
 // a link the app accepts from browsers — opening its "home icon" sends people to the
 // Play Store instead. These scheme links open the app itself (no payment details in them).
 const UPI_APPS = {
-  gpay: { name: "GPay", direct: true, pkg: "com.google.android.apps.nbu.paisa.user", scheme: "tez", ios: "gpay://" },
-  phonepe: { name: "PhonePe", direct: true, pkg: "com.phonepe.app", scheme: "phonepe", ios: "phonepe://" },
+  gpay: { name: "GPay", direct: true, pkg: "com.google.android.apps.nbu.paisa.user", scheme: "tez", path: "upi/", ios: "gpay://" }, // tested: opens
+  phonepe: { name: "PhonePe", direct: true, pkg: "com.phonepe.app", scheme: "phonepe", path: "native", ios: "phonepe://" }, // tested: opens
   paytm: { name: "Paytm", direct: true, pkg: "net.one97.paytm", scheme: "paytmmp", path: "cash_wallet?featuretype=scanner", ios: "paytmmp://cash_wallet?featuretype=scanner" }, // tested: opens Paytm home, no error
   navi: { name: "Navi", pkg: "com.naviapp" },
   bhim: { name: "BHIM", pkg: "in.org.npci.upiapp" },
