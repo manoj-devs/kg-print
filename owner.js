@@ -570,7 +570,8 @@ function cardHTML(o) {
   const pages = o.files.reduce((s, f) => s + f.pages * f.copies, 0);
   const filesHTML = o.files.map((f, i) => {
     const flag = f.pages_source === "manual" ? `<small class="warn">⚠ pages typed by student — check</small>`
-      : f.pages_source === "estimate" ? `<small class="warn">⚠ Word page count estimated — check</small>` : "";
+      : f.pages_source === "estimate" ? `<small class="warn">⚠ Word page count estimated — check</small>`
+      : f.pages_source === "word" ? `<small class="muted">Word's own page count</small>` : "";
     return `<div class="ofile">
       <span class="ficon ${esc(f.kind)}">${KIND_LABEL[f.kind] || "FILE"}</span>
       <div class="meta"><div title="${esc(f.name)}">${esc(f.name)}</div>
@@ -600,7 +601,7 @@ function cardHTML(o) {
     ${o.status === "payment_review" || o.status === "rejected" ? payHTML(o) : `<div class="ocard-sec"><small class="muted">UTR</small> <span class="utr" style="font-size:14px">${esc(o.utr || "—")}</span></div>`}
     <div class="ocard-sec">${filesHTML}${o.notes ? `<div class="note">📝 ${esc(o.notes)}</div>` : ""}
       ${adjustInfo(o)}
-      ${["payment_review", "queued", "ready"].includes(o.status) ? `<button class="btn small" data-act="adjust" style="margin-top:6px">✏ Adjust pages</button>` : ""}</div>
+</div>
     ${o.status === "rejected" && o.reject_reason ? `<div class="ocard-sec"><small class="muted">Rejected:</small> ${esc(o.reject_reason)}</div>` : ""}
     <div class="actions">${actions}</div>
   </article>`;

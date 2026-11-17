@@ -387,103 +387,23 @@ async function countPages(it) {
       it.pagesSource = "auto";
       pdf.destroy();
     } else if (it.kind === "docx") {
-      // Word files have no fixed pages. We take the HIGHEST of:
-      //  1) the page count Word stored when the file was last saved (docProps/app.xml)
-      //  2) the page-break markers Word writes while laying out the text
-      //  3) our own layout: the document is laid out on its real page size in the
-      //     browser and the pages are counted (works for Google Docs / phone files too)
+      // Word saves its own page count in the file (docProps/app.xml) every time it is
+      // saved — the same number Word shows at the bottom ("Page 1 of 21"). That is the
+      // count the shop sees when it opens the file, so we use exactly that.
       const zip = await JSZip.loadAsync(buf);
       const app = zip.file("docProps/app.xml") ? await zip.file("docProps/app.xml").async("string") : "";
-      const doc = zip.file("word/document.xml") ? await zip.file("word/document.xml").async("string") : "";
       const saved = +((app.match(/<Pages>(\d+)<\/Pages>/) || [])[1] || 0);
-      const rendered = (doc.match(/<w:lastRenderedPageBreak\s*\/>/g) || []).length;
-      const hard = (doc.match(/<w:br [^>]*w:type="page"[^>]*\/>/g) || []).length + (doc.match(/<w:pageBreakBefore(?:\s*\/>|\s+w:val="(?:1|true|on)")/g) || []).length;
-      const laid = await docxLayoutPages(buf).catch((e) => { console.warn("layout count failed", e); return 0; });
-      const est = Math.max(saved, rendered ? rendered + 1 : 0, hard ? hard + 1 : 0, laid);
-      if (est) { it.total = est; it.minPages = est; it.pagesSource = "estimate"; }
-      else it.pagesSource = "manual";
+      if (saved > 0 && saved <= 2000) { it.total = saved; it.pagesSource = "word"; }
+      else it.pagesSource = "manual";        // no count saved → must be uploaded as PDF
     } else if (it.kind === "doc") {
       const n = (() => { try { return docPageCount(buf); } catch (e) { return 0; } })();
-      if (n > 0 && n <= 2000) { it.total = n; it.minPages = n; it.pagesSource = "estimate"; }
+      if (n > 0 && n <= 2000) { it.total = n; it.pagesSource = "word"; }
       else it.pagesSource = "manual";
     }
     applyRange(it);
   } catch (e) {
     it.pagesSource = "manual";
-    toast(`Couldn't count pages in ${it.name}. Please type the page count.`, "warn", 6000);
-  }
-}
-
-// ---- Word layout page count ----
-// Lays the .docx out on its own page size (off-screen) and counts the pages.
-// One file at a time, with a time limit, so a big file can't freeze the phone.
-const DOCX_PREVIEW_URL = "https://cdn.jsdelivr.net/npm/docx-preview@0.3.6/dist/docx-preview.min.js";
-let layoutQueue = Promise.resolve();
-function docxLayoutPages(buf) {
-  const job = layoutQueue.then(() => Promise.race([
-    layoutOnce(buf),
-    new Promise((_, rej) => setTimeout(() => rej(new Error("layout timeout")), 25000)),
-  ]));
-  layoutQueue = job.catch(() => {});
-  return job;
-}
-async function layoutOnce(buf) {
-  if (buf.byteLength > 20 * 1024 * 1024) return 0;      // very big file: use Word's own numbers
-  if (!window.docx) await KG.loadScript(DOCX_PREVIEW_URL);
-  // A sealed box (shadow DOM, styles reset) so the website's own CSS can't change the layout
-  const outer = document.createElement("div");
-  outer.setAttribute("aria-hidden", "true");
-  outer.style.cssText = "all:initial;position:absolute;left:-30000px;top:0;visibility:hidden;pointer-events:none;contain:layout style";
-  document.body.appendChild(outer);
-  const root = outer.attachShadow({ mode: "open" });
-  const styleBox = document.createElement("div");
-  const host = document.createElement("div");
-  root.append(styleBox, host);
-  try {
-    await docx.renderAsync(buf, host, styleBox, {
-      inWrapper: false, breakPages: true, ignoreLastRenderedPageBreak: true,
-      renderHeaders: true, renderFooters: true, renderFootnotes: true, renderEndnotes: true,
-      useBase64URL: false, experimental: true,
-    });
-    const imgs = [...host.querySelectorAll("img")];
-    await Promise.race([
-      Promise.all(imgs.map((i) => (i.complete ? 0 : new Promise((r) => { i.onload = i.onerror = r; })))),
-      new Promise((r) => setTimeout(r, 4000)),
-    ]);
-    // Word's line spacing is a multiple of the FONT's natural line height; the
-    // preview uses a multiple of the font SIZE (≈15–20% shorter). Fix that first.
-    const nat = {};
-    const probe = document.createElement("span");
-    probe.textContent = "Hg";
-    probe.style.cssText = "position:absolute;line-height:normal;white-space:nowrap;font-size:100px";
-    host.appendChild(probe);
-    const factor = (fam) => { if (!nat[fam]) { probe.style.fontFamily = fam; nat[fam] = probe.getBoundingClientRect().height / 100 || 1; } return nat[fam]; };
-    const paras = host.querySelectorAll("article p, article li");
-    const fixes = [];
-    for (const el of paras) {
-      const cs = getComputedStyle(el);
-      if (cs.lineHeight === "normal") continue;
-      const fs = parseFloat(cs.fontSize), lh = parseFloat(cs.lineHeight), mult = lh / fs;
-      if (!(mult >= 0.95 && mult <= 3.2)) continue;      // an exact / "at least" spacing: keep
-      fixes.push([el, lh * factor(cs.fontFamily)]);
-    }
-    for (const [el, v] of fixes) el.style.lineHeight = v + "px";   // write after reading (no layout thrash)
-    probe.remove();
-    let pages = 0;
-    for (const sec of host.querySelectorAll("section.docx")) {
-      const cs = getComputedStyle(sec);
-      const pageH = parseFloat(cs.minHeight) || sec.offsetHeight;
-      const avail = pageH - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom);
-      const art = sec.querySelector("article") || sec;
-      if (!(avail > 100)) continue;
-      // 4% kept free per page: Word moves lines down to keep headings with their text
-      // and to avoid single lines at the top/bottom of a page
-      pages += Math.max(1, Math.ceil((art.scrollHeight - 1) / (avail * 0.96)));
-    }
-    return pages;
-  } finally {
-    host.querySelectorAll("img").forEach((i) => { if (i.src.startsWith("blob:")) URL.revokeObjectURL(i.src); });
-    outer.remove();
+    toast(`Couldn't count pages in ${it.name}. Please save it as PDF and upload the PDF.`, "warn", 7000);
   }
 }
 
@@ -561,15 +481,15 @@ function pagesNote(it) {
   if (it.loading) return `<span class="spinner"></span> counting pages…`;
   if (it.kind === "image") return "Photo · 1 page per copy";
   if (it.pagesSource === "auto") return `${it.total} page${it.total > 1 ? "s" : ""} (counted)`;
-  if (it.pagesSource === "estimate") return `<span class="warn">≈ ${it.minPages || it.total} pages (Word count). For the exact count, upload it as PDF.</span>`;
-  return `<span class="warn">Enter the number of pages</span>`;
+  if (it.pagesSource === "word") return `${it.total} page${it.total > 1 ? "s" : ""} (Word's own page count)`;
+  return `<span class="warn">✕ Couldn't count the pages of this file. Save it as PDF and upload the PDF instead.</span>`;
 }
 
 function renderItems() {
   const list = $("#fileList");
   if (!list) return;
   list.innerHTML = items.map((it) => {
-    const locked = it.kind === "image" || it.pagesSource === "auto";
+    const locked = true; // page counts are never typed by students — PDF/photo counted exactly, Word counted by layout
     return `<div class="file" data-id="${it.id}">
       <div class="file-head">
         <span class="ficon ${it.kind}">${KIND_LABEL[it.kind]}</span>
@@ -655,9 +575,21 @@ function updateTotals() {
     if (it) row.querySelector("[data-price]").textContent = rupees(linePrice(settings, it));
   });
   const busy = items.some((i) => i.loading);
-  const show = items.length > 0 && !busy;
+  // a file whose pages we couldn't count → no payment until it's replaced by a PDF
+  const uncounted = items.filter((i) => !i.loading && i.pagesSource === "manual");
+  const show = items.length > 0 && !busy && !uncounted.length;
   $("#payCard").hidden = !show;
   $("#confirmCard").hidden = !show;
+  let block = $("#uncountedNote");
+  if (!block) {
+    block = document.createElement("div");
+    block.id = "uncountedNote";
+    block.className = "banner";
+    block.style.cssText = "margin:12px 0;background:#fde8e8;border-color:#f2a9a9;color:#9b1c1c";
+    $("#payCard").before(block);
+  }
+  block.hidden = !uncounted.length;
+  if (uncounted.length) block.innerHTML = `✕ <b>${esc(uncounted[0].name)}</b>: we couldn't count its pages, so the price can't be worked out. Remove it (✕) and upload it as <b>PDF</b> (Word → File → Save As → PDF, or Google Docs → Download → PDF). <b>Don't pay yet.</b>`;
   if (!show) return;
 
   const total = orderTotal();
@@ -1001,6 +933,8 @@ async function submitOrder(e) {
   if (!flat) return fail("Enter your flat / room number", "#fFlat");
   if (!items.length) return fail("Add at least one file to print");
   if (items.some((i) => i.loading)) return fail("Wait — still counting pages");
+  const uncounted = items.find((i) => i.pagesSource === "manual");
+  if (uncounted) return fail(`${uncounted.name}: we couldn't count its pages. Save it as PDF (Word → File → Save As → PDF) and upload the PDF instead.`);
   const badRange = items.find((i) => i.rangeMode === "custom" && i.rangeErr);
   if (badRange) return fail(`${badRange.name}: ${badRange.rangeErr}`);
   if (utr && !/^\d{12}$/.test(utr)) return fail("The UTR must be exactly 12 digits — or leave the box empty", "#fUtr");
