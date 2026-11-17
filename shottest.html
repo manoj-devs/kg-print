@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>KG Print — Screenshot tester (owner)</title>
+  <meta name="robots" content="noindex">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css?v=20261117e">
+  <style>
+    .wrap { max-width: 720px; margin: 0 auto; padding: 16px; }
+    .verdict { border-radius: 12px; padding: 14px 16px; font-weight: 600; margin: 14px 0; line-height: 1.5; }
+    .v-ok { background: #e6f6ea; color: #14612b; border: 1.5px solid #9fd5ae; }
+    .v-retry { background: #fff4dc; color: #7a4a00; border: 1.5px solid #f0cf86; }
+    .v-block { background: #fde8e8; color: #9b1c1c; border: 1.5px solid #f2a9a9; }
+    .rows { display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; font-size: 14px; }
+    .rows b { font-weight: 600; }
+    #ocrText { white-space: pre-wrap; font: 12px/1.4 ui-monospace, monospace; background: #f6f6f6; padding: 10px; border-radius: 8px; max-height: 320px; overflow: auto; }
+    #shotImg { max-width: 220px; border-radius: 8px; border: 1px solid #ddd; display: block; margin-top: 8px; }
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    @media (max-width: 520px) { .grid2 { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1 style="margin:8px 0 4px">Screenshot tester</h1>
+    <p class="hint" style="margin-top:0">Owner only. Upload any payment screenshot (GPay, PhonePe, Paytm, Navi, BHIM…) to see what the website would decide. <b>No order is created and nothing is saved.</b></p>
+
+    <div id="gate" class="card" hidden></div>
+
+    <div id="tool" hidden>
+      <div class="card">
+        <label class="field"><span>Payment screenshot</span><input type="file" id="tShot" accept="image/*"></label>
+        <img id="shotImg" alt="" hidden>
+        <div class="grid2" style="margin-top:10px">
+          <label class="field"><span>Order amount ₹ (exactly as the order would ask, e.g. 4.50)</span><input type="number" id="tAmt" step="0.01" min="0.01" inputmode="decimal"></label>
+          <label class="field"><span>UTR the student would type (12 digits)</span><input type="text" id="tUtr" inputmode="numeric" maxlength="12" placeholder="filled from the screenshot"></label>
+        </div>
+        <label class="field"><span>Pretend the order was placed at (for an old screenshot, set the payment's date &amp; time)</span><input type="datetime-local" id="tWhen"></label>
+        <button type="button" class="btn primary" id="tRun" disabled>Check screenshot</button>
+      </div>
+
+      <div id="out" hidden>
+        <div id="verdict" class="verdict"></div>
+        <div class="card">
+          <div class="rows" id="facts"></div>
+          <details style="margin-top:10px"><summary>Text the website read from the screenshot</summary><div id="ocrText"></div></details>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+  <script src="config.js?v=20261117e"></script>
+  <script src="common.js?v=20261117e"></script>
+  <script src="shottest.js?v=20261117e"></script>
+</body>
+</html>

@@ -782,7 +782,14 @@
     const reads = [];
     if (top) reads.push({ text: top.text, vals: amountsInLine(top.text) });
     if (top && mainDigits) reads.push({ text: mainDigits, vals: amountsFromDigits(mainDigits) });
-    for (const t of bigReads || []) reads.push({ text: t, vals: amountsInLine(t) });
+    // The digits-only reader can't see letters, so "paytmqr72bcup" comes out as "72".
+    // Skip a reading whose digits the normal reader saw inside a word / UPI ID.
+    const glued = (lines || []).flatMap((l) => (l.text || "").split(/\s+/)).filter((w) => /[a-z]{2,}/i.test(w) && /\d/.test(w) || /@/.test(w));
+    for (const t of bigReads || []) {
+      const d = (t || "").replace(/\D/g, "");
+      if (d && glued.some((w) => w.replace(/\D/g, "").includes(d) || (d.length >= 3 && w.replace(/\D/g, "").includes(d.slice(0, -2))))) continue;
+      reads.push({ text: t, vals: amountsInLine(t) });
+    }
     const used = reads.filter((r) => r.vals.length);
     if (!used.length) return null;
     const values = [...new Set(used.flatMap((r) => r.vals))];
