@@ -1,0 +1,56 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>KG Print – app link test</title>
+<style>body{font:16px system-ui,sans-serif;margin:16px;background:#f6f4ee;color:#17171a}h2{margin:22px 0 8px}
+a{display:block;padding:14px;margin:8px 0;border:2px solid #17171a;border-radius:12px;background:#fff;color:#17171a;text-decoration:none;font-weight:600}
+small{display:block;font-weight:400;color:#666;word-break:break-all;font-size:11px}#msg{position:sticky;top:0;background:#7a4a00;color:#fff;padding:10px;border-radius:10px;display:none}</style></head><body>
+<h1>App link test</h1>
+<p>Tap each button, and if an app opens, look at what it shows, then come back here. The page records whether each one opened. For any that OPENED, also tell me if the app showed an <b>error page</b>.</p><p style="display:none"> Note the <b>number</b> and what happened: <b>✅ opened the app normally</b> / ⚠ error page in the app / ❌ didn't open / Play Store. Come back here after each one.</p>
+<div id="msg"></div>
+<div style="background:#fff;border:2px solid #1a3fd1;border-radius:12px;padding:10px;margin:10px 0"><b>Results (filled automatically):</b><div id="res" style="font-family:monospace;margin:6px 0">none yet</div><button id="copy" style="padding:10px 14px;font-weight:700">Copy results</button> <span style="font-size:13px">Browser: <b id="br"></b></span></div>
+<div id="list"></div>
+<script>
+const back = (id) => encodeURIComponent(location.href.split("#")[0] + "#fail-" + id);
+const P = "net.one97.paytm", G = "com.google.android.apps.nbu.paisa.user", PE = "com.phonepe.app";
+const I = (id, host, scheme, pkg) => `intent://${host}#Intent;scheme=${scheme};package=${pkg};S.browser_fallback_url=${back(id)};end`;
+const L = (id, pkg) => `intent:#Intent;action=android.intent.action.MAIN;category=android.intent.category.LAUNCHER;package=${pkg};S.browser_fallback_url=${back(id)};end`;
+const tests = [
+  ["Paytm", [
+    ["P1", (id) => I(id, "", "paytmmp", P)],
+    ["P2", (id) => I(id, "cash_wallet", "paytmmp", P)],
+    ["P3", (id) => I(id, "cash_wallet?featuretype=scanner", "paytmmp", P)],
+    ["P4", (id) => `paytmmp://`],
+    ["P5", (id) => `paytmmp://cash_wallet`],
+  ]],
+  ["PhonePe", [
+    ["E1", (id) => I(id, "", "phonepe", PE)],
+    ["E2", (id) => `phonepe://`],
+    ["E3", (id) => L(id, PE)],
+  ]],
+  ["GPay", [
+    ["G1", (id) => I(id, "", "tez", G)],
+    ["G2", (id) => I(id, "", "gpay", G)],
+    ["G3", (id) => `tez://upi/`],
+    ["G4", (id) => `gpay://`],
+    ["G5", (id) => L(id, G)],
+  ]],
+];
+const list = document.getElementById("list");
+for (const [app, items] of tests) {
+  list.insertAdjacentHTML("beforeend", `<h2>${app}</h2>`);
+  for (const [id, fn] of items) {
+    const a = document.createElement("a"); a.href = fn(id);
+    a.innerHTML = `${id}<small>${a.href.split("#Intent")[0]}</small>`;
+    a.onclick = () => { hideMsg(); current = id; left = false;
+      setTimeout(() => { if (current !== id) return; if (left) { rec(id, "OPENED"); } else { rec(id, "NO"); show(id + ": the app did not open."); } }, 3000); };
+    list.appendChild(a);
+  }
+}
+let current = null, left = false; const results = {};
+document.addEventListener("visibilitychange", () => { if (document.hidden && current) left = true; });
+function rec(id, r){ if (results[id] === "OPENED") return; results[id] = r; document.getElementById("res").textContent = Object.entries(results).map(([k,v]) => k + "=" + v).join(", "); }
+function hideMsg(){ document.getElementById("msg").style.display = "none"; }
+document.getElementById("br").textContent = navigator.brave ? "Brave" : /SamsungBrowser/.test(navigator.userAgent) ? "Samsung" : /Chrome/.test(navigator.userAgent) ? "Chrome" : "other";
+document.getElementById("copy").onclick = () => { const t = "Browser " + document.getElementById("br").textContent + ": " + document.getElementById("res").textContent; (navigator.clipboard ? navigator.clipboard.writeText(t) : Promise.reject()).then(() => show("Copied — paste it to Claude"), () => show(t)); };
+function show(t){const m=document.getElementById("msg");m.textContent=t;m.style.display="block";}
+addEventListener("hashchange", () => { const m = location.hash.match(/#fail-(\w+)/); if (m) { rec(m[1], "NO"); show(m[1] + ": the app did not open (came back)."); history.replaceState(null, "", location.href.split("#")[0]); } });
+</script></body></html>
