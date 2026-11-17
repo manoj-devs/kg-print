@@ -913,16 +913,18 @@ function showShotStatus() {
   }
   if (r.state === "unavailable") { box.classList.add("meh"); box.textContent = "⚠ Couldn't read this screenshot clearly. Type the 12-digit UTR from your UPI app (payment details → UPI Ref No.). The owner will check the payment."; return; }
   if (!r.utrTyped) {
+    // no UTR (e.g. the first "Paid ✓" screen) — fine: amount + shop name are what count
+    if (r.amount && r.payee !== false) { box.classList.add("good"); box.textContent = `✓ ${rupeesExact(orderTotal())} paid to ${settings.payee_name} found in your screenshot`; return; }
     box.classList.add("meh");
-    box.textContent = (r.utrCandidates || []).length
-      ? "✓ Screenshot read. Check the UTR above."
-      : "⚠ Couldn't find a 12-digit UTR in the screenshot. Type it from your UPI app (payment details → UPI Ref No.), or upload a screenshot where the Ref No. is visible.";
+    box.textContent = !r.amount
+      ? `⚠ Couldn't read ${rupeesExact(orderTotal())} in your screenshot. Make sure you paid EXACTLY this amount and the screenshot shows it.`
+      : `⚠ The screenshot doesn't show payment to ${settings.payee_name}. Make sure you paid the shop.`;
     return;
   }
   if (r.utr && r.amount) { box.classList.add("good"); box.textContent = `✓ UTR and ${rupeesExact(orderTotal())} found in your screenshot`; return; }
   box.classList.add("meh");
   box.textContent = !r.utr
-    ? "⚠ Couldn't find this exact UTR in your screenshot. Check every digit, or upload the screenshot that shows it."
+    ? (!(r.utrCandidates || []).length ? "⚠ " + "This screenshot doesn't show the UTR (it's the first \"Paid\" screen). In your UPI app, tap this payment to open its DETAILS — GPay: \"UPI transaction ID\", PhonePe: \"UTR\", Paytm: \"UPI Ref No.\" — and upload a screenshot of that page." : "⚠ Couldn't find this exact UTR in your screenshot. Check every digit, or upload the screenshot that shows it.")
     : `⚠ UTR found, but couldn't read ${rupeesExact(orderTotal())} clearly. Make sure you paid EXACTLY this amount.`;
 }
 
@@ -930,13 +932,14 @@ function showShotStatus() {
 function autoFillUtr() {
   if (!shotOcr) return;
   if (!shotOcr.text || shotOcr.text.replace(/\s/g, "").length < 15) {
-    $("#utrHint").innerHTML = "⚠ Couldn't read the screenshot clearly — please type the UTR (UPI app → payment details → UPI Ref No.).";
+    $("#utrHint").innerHTML = "⚠ Couldn't read the screenshot clearly. If your UPI app shows a UTR / UPI Ref No., you can type it here (optional).";
     return;
   }
   const c = KG.utrCandidates(shotOcr.text);
   const box = $("#fUtr"), hint = $("#utrHint");
   if (!c.length) {
-    hint.innerHTML = "⚠ Couldn't read the UTR from the screenshot — please type it (UPI app → payment details → UPI Ref No.).";
+    hint.innerHTML = "No UTR in this screenshot — that's fine, you can leave this empty.";
+    hint.classList.remove("qr-saved");
     return;
   }
   if (!box.value.trim() || box.dataset.auto === "1") {
@@ -1000,7 +1003,7 @@ async function submitOrder(e) {
   if (items.some((i) => i.loading)) return fail("Wait — still counting pages");
   const badRange = items.find((i) => i.rangeMode === "custom" && i.rangeErr);
   if (badRange) return fail(`${badRange.name}: ${badRange.rangeErr}`);
-  if (!/^\d{12}$/.test(utr)) return fail("UTR must be exactly 12 digits", "#fUtr");
+  if (utr && !/^\d{12}$/.test(utr)) return fail("The UTR must be exactly 12 digits — or leave the box empty", "#fUtr");
   if (!shot) return fail("Upload your payment screenshot", "#fShot");
   if (!shot.type.startsWith("image/")) return fail("Screenshot must be an image", "#fShot");
   if (shot.size > MAX_SHOT) return fail("Screenshot is too big (max 8 MB)", "#fShot");
@@ -1040,7 +1043,7 @@ async function submitOrder(e) {
         if (ocrFails >= 2) $("#overrideBox").hidden = false;
         const first = (r.hard || [])[0];
         const what = first ? first.msg
-          : problems.includes("utr") ? "This exact UTR is not in your screenshot. Check every digit, or upload the screenshot that shows the UTR."
+          : problems.includes("utr") ? (!(r.utrCandidates || []).length ? "This screenshot doesn't show the UTR (it's the first \"Paid\" screen). In your UPI app, tap this payment to open its DETAILS — GPay: \"UPI transaction ID\", PhonePe: \"UTR\", Paytm: \"UPI Ref No.\" — and upload a screenshot of that page." : "This exact UTR is not in your screenshot. Check every digit, or upload the screenshot that shows the UTR.")
           : problems.includes("amount") ? `Couldn't read ${rupeesExact(orderTotal())} in your screenshot. Pay EXACTLY ${rupeesExact(orderTotal())} and upload the original screenshot (not from WhatsApp).`
           : `The screenshot doesn't show payment to ${settings.payee_name}. Make sure you paid the shop.`;
         return fail(ocrFails >= 2 ? what + " If your payment is correct, tick the box below to send it to the shop owner." : what, problems.includes("utr") ? "#fUtr" : "#fShot");
@@ -1048,12 +1051,22 @@ async function submitOrder(e) {
       studentCheck = { utr: r.utr, amount: r.amount, payee: r.payee, override: problems.length > 0, missing: problems, warn: r.warn || [], utrSeen: r.utrSeen || null, dev: devScreen() };
     }
 
+    // The UTR is saved only when it's confirmed by the screenshot, or when the
+    // screenshot itself has no UTR to compare (then it's just a note for the owner).
+    const utrToSave = utr && (r.utr || !(r.utrCandidates || []).length) ? utr : (r.utrCandidates || [])[0] || null;
+    // fingerprint of this payment (amount + date + time on the screenshot)
+    const payKey = r.state === "read" ? KG.payKey(shotOcr.text, orderTotal()) : null;
+
     setBusy("Checking payment details…");
     const sha = await sha256Hex(shot);
-    const { data: dup, error: dupErr } = await sb.rpc("check_payment", { p_utr: utr, p_sha: sha });
+    let { data: dup, error: dupErr } = await sb.rpc("check_payment", { p_utr: utrToSave, p_sha: sha, p_key: payKey });
+    if (dupErr && /function|p_key|schema cache/i.test(dupErr.message || "")) {
+      ({ data: dup, error: dupErr } = await sb.rpc("check_payment", { p_utr: utrToSave || "000000000000", p_sha: sha })); // database not updated yet
+    }
     if (dupErr) throw dupErr;
     if (dup === "utr") return fail("This UTR was already used for another order. Each payment can be used only once.", "#fUtr");
     if (dup === "shot") return fail("This screenshot was already uploaded before. Please upload the screenshot of THIS payment.", "#fShot");
+    if (dup === "pay") return fail("This payment was already used for another order. Each payment can be used only once — pay for this order and upload its screenshot.", "#fShot");
 
     const batch = crypto.randomUUID();
     const files = [];
@@ -1081,7 +1094,8 @@ async function submitOrder(e) {
 
     setBusy("Getting your token…");
     const { data: order, error: insErr } = await sb.from("orders").insert({
-      student_name: name, phone, flat, files, notes, utr,
+      student_name: name, phone, flat, files, notes, utr: utrToSave,
+      ...(payKey ? { pay_key: payKey } : {}),
       screenshot_path: shotPath, screenshot_sha256: sha,
       paise: getPaise(), student_check: studentCheck,
       shot_taken_at: shot.lastModified ? new Date(shot.lastModified).toISOString() : null,
@@ -1256,7 +1270,7 @@ function renderOrders() {
         ${adjust}
         ${o.status === "rejected" && o.reject_reason ? `<div class="banner bad" style="margin:8px 0 0;padding:8px 10px">Reason: ${esc(o.reject_reason)}${o.fake ? "<br><b>Marked as a fake payment.</b> 2 fake payments block your account." : ""}</div>` : ""}
         ${o.status === "ready" ? `<div class="banner" style="margin:8px 0 0;padding:8px 10px;background:var(--ok-soft);border-color:#bfe3c9">Show token <b>${esc(o.token)}</b> at the shop to collect.</div>` : ""}
-        <small>Placed ${fmtTime(o.created_at)} · UTR ${esc(o.utr)}</small>
+        <small>Placed ${fmtTime(o.created_at)}${o.utr ? ` · UTR ${esc(o.utr)}` : ""}</small>
       </div>
     </div>`;
   }).join("");

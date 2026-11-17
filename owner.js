@@ -222,7 +222,7 @@ let verifying = null;
 function openVerify(o) {
   verifying = o;
   $("#verAmt").innerHTML = findAmountHTML(o.total);
-  $("#verUtr").textContent = o.utr;
+  $("#verUtr").textContent = o.utr || "— (not on screenshot)";
   $("#verWho").textContent = `${o.token} · ${o.student_name}`;
   let pref = "1";
   try { pref = localStorage.getItem("kg_open_job") ?? "1"; } catch (e) { /* ignore */ }
@@ -367,7 +367,7 @@ function exportCsv() {
     lines.push([
       o.token_day, o.token, fmtTime(o.created_at), o.student_name, o.flat, o.phone, o.email, STATUS[o.status] || o.status,
       fileText, bw, colour, Number(o.total).toFixed(2), o.adjusted_total != null ? Number(o.adjusted_total).toFixed(2) : "",
-      diff === "" ? "" : diff.toFixed(2), paidAmount(o).toFixed(2), `'${o.utr}`, o.notes || "", o.reject_reason || "",
+      diff === "" ? "" : diff.toFixed(2), paidAmount(o).toFixed(2), o.utr ? `'${o.utr}` : "", o.notes || "", o.reject_reason || "",
     ].map(csvCell).join(","));
   }
   const blob = new Blob(["\ufeff" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
@@ -597,7 +597,7 @@ function cardHTML(o) {
       </div>
       <div class="amt">${rupeesExact(o.total)}<br><small class="muted" style="font:400 12px Inter">${pages} pages</small></div>
     </div>
-    ${o.status === "payment_review" || o.status === "rejected" ? payHTML(o) : `<div class="ocard-sec"><small class="muted">UTR</small> <span class="utr" style="font-size:14px">${esc(o.utr)}</span></div>`}
+    ${o.status === "payment_review" || o.status === "rejected" ? payHTML(o) : `<div class="ocard-sec"><small class="muted">UTR</small> <span class="utr" style="font-size:14px">${esc(o.utr || "—")}</span></div>`}
     <div class="ocard-sec">${filesHTML}${o.notes ? `<div class="note">📝 ${esc(o.notes)}</div>` : ""}
       ${adjustInfo(o)}
       ${["payment_review", "queued", "ready"].includes(o.status) ? `<button class="btn small" data-act="adjust" style="margin-top:6px">✏ Adjust pages</button>` : ""}</div>
@@ -615,7 +615,7 @@ function payHTML(o) {
     <div style="flex:1;min-width:0">
       <small class="muted">Find EXACTLY this amount in your UPI app / bank SMS:</small>
       <div class="find-amt">${findAmountHTML(o.total)}</div>
-      <div class="utr"><small class="muted" style="font:400 12px Inter">UTR</small> ${esc(o.utr)} <button class="btn small ghost" data-act="copy" title="Copy UTR">⧉</button></div>
+      ${o.utr ? `<div class="utr"><small class="muted" style="font:400 12px Inter">UTR</small> ${esc(o.utr)} <button class="btn small ghost" data-act="copy" title="Copy UTR">⧉</button></div>` : `<div class="utr"><small class="muted" style="font:400 12px Inter">No UTR on screenshot — match the amount</small></div>`}
       <div class="chips">${chips}</div>
     </div>
   </div>`;
@@ -652,7 +652,7 @@ function checkChips(o) {
     if (c.reusedBy) chips.push(chip("bad", `✕ Payment already used for ${esc(c.reusedBy)}`));
     if (c.utr) chips.push(chip("good", "✓ Exact UTR seen in screenshot"));
     else if (c.utrSeen) chips.push(chip("bad", `✕ Screenshot shows UTR ${esc(c.utrSeen)} — not ${esc(o.utr)}`));
-    else chips.push(chip("meh", "UTR not seen in screenshot"));
+    else if (o.utr) chips.push(chip("meh", "UTR not seen in screenshot"));
     if (c.amount) chips.push(chip("good", `✓ ${rupeesExact(o.total)} seen`));
     else if (c.wrongAmounts && c.wrongAmounts.length) chips.push(chip("bad", `✕ Shows ${rupeesExact(c.wrongAmounts[0])}, not ${rupeesExact(o.total)}`));
     else chips.push(chip("meh", `${rupeesExact(o.total)} not seen`));

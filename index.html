@@ -11,7 +11,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=20261117f">
+  <link rel="stylesheet" href="styles.css?v=20261117h">
 </head>
 <body>
   <header class="topbar">
@@ -37,7 +37,7 @@
       </div>
       <ol class="steps">
         <li><span class="step-no">1</span><div><b>Upload</b><small>PDF, Word (.docx / .doc) or photos. Pick colour, sides and copies (colour is 1-side only).</small></div></li>
-        <li><span class="step-no">2</span><div><b>Pay by UPI</b><small>Any UPI app (GPay, PhonePe, Paytm, Navi, BHIM…) — then enter the 12-digit UTR and screenshot.</small></div></li>
+        <li><span class="step-no">2</span><div><b>Pay by UPI</b><small>Any UPI app (GPay, PhonePe, Paytm, Navi, BHIM…) — then upload the payment screenshot.</small></div></li>
         <li><span class="step-no">3</span><div><b>Get your token</b><small>Show your KG token at the shop when the status says Ready.</small></div></li>
       </ol>
       <button id="googleBtn" class="btn gbtn block">
@@ -124,20 +124,20 @@
 
           <div class="card" id="confirmCard" hidden>
             <div class="card-head"><span class="step-no">4</span><h2>Confirm your payment</h2></div>
-            <div class="banner welcome-back" id="backBanner" hidden>👋 <b>Welcome back!</b> Take a screenshot of the payment details and upload it below — we fill in the UTR for you.</div>
+            <div class="banner welcome-back" id="backBanner" hidden>👋 <b>Welcome back!</b> Take a screenshot of the payment success screen and upload it below.</div>
             <label class="field"><span>Payment screenshot</span>
               <input type="file" id="fShot" accept="image/*" required>
-              <div class="hint">Take the screenshot on the payment <b>details</b> page, so the <b>amount</b> and <b>UTR / UPI Ref No.</b> are both visible.</div>
+              <div class="hint">Screenshot the payment <b>success</b> screen right after paying. It must show the <b>amount</b>, the <b>shop name</b> and the <b>date &amp; time</b>. Don't crop it or send it through WhatsApp.</div>
               <img id="shotPreview" class="shot-preview" alt="" hidden>
             </label>
-            <label class="field"><span>UTR / UPI Ref. No. (12 digits)</span>
-              <input type="text" id="fUtr" inputmode="numeric" placeholder="Filled automatically from your screenshot" autocomplete="off" required>
-              <div class="hint" id="utrHint">Upload the screenshot above — we read the UTR from it. You can also type it.</div>
+            <label class="field"><span>UTR / UPI Ref. No. <small class="muted">(optional)</small></span>
+              <input type="text" id="fUtr" inputmode="numeric" placeholder="Filled automatically if your screenshot shows it" autocomplete="off">
+              <div class="hint" id="utrHint">Not needed if your screenshot doesn't show one. We fill it in automatically when it does.</div>
             </label>
             <div id="shotStatus" class="shot-status" hidden></div>
             <label id="overrideBox" class="override" hidden>
               <input type="checkbox" id="fOverride">
-              <span>My UTR is correct, the screenshot is just hard to read. Send it to the owner to check manually. <b>Fake payments block your account.</b></span>
+              <span>My payment is correct, the screenshot is just hard to read. Send it to the owner to check manually. <b>Fake payments block your account.</b></span>
             </label>
             <label class="field"><span>Notes for the shop (optional)</span>
               <textarea id="fNotes" maxlength="500" placeholder="e.g. print only pages 1–5, staple it, spiral binding…"></textarea>
@@ -173,8 +173,8 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js" defer></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js" defer></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js" defer></script>
-  <script src="config.js?v=20261117f" defer></script>
-  <script src="common.js?v=20261117f" defer></script>
-  <script src="app.js?v=20261117f" defer></script>
+  <script src="config.js?v=20261117h" defer></script>
+  <script src="common.js?v=20261117h" defer></script>
+  <script src="app.js?v=20261117h" defer></script>
 </body>
 </html>

@@ -784,10 +784,12 @@
     if (top && mainDigits) reads.push({ text: mainDigits, vals: amountsFromDigits(mainDigits) });
     // The digits-only reader can't see letters, so "paytmqr72bcup" comes out as "72".
     // Skip a reading whose digits the normal reader saw inside a word / UPI ID.
-    const glued = (lines || []).flatMap((l) => (l.text || "").split(/\s+/)).filter((w) => /[a-z]{2,}/i.test(w) && /\d/.test(w) || /@/.test(w));
+    // (Times like "10:19pm" and dates are not IDs, so they don't count.)
+    const glued = (lines || []).flatMap((l) => (l.text || "").split(/\s+/))
+      .filter((w) => !/[:\/]/.test(w) && (/@/.test(w) || (/[a-z]{2,}/i.test(w) && /[a-z]\d|\d[a-z]/i.test(w))));
     for (const t of bigReads || []) {
       const d = (t || "").replace(/\D/g, "");
-      if (d && glued.some((w) => w.replace(/\D/g, "").includes(d) || (d.length >= 3 && w.replace(/\D/g, "").includes(d.slice(0, -2))))) continue;
+      if (d.length >= 2 && glued.some((w) => { const g = w.replace(/\D/g, ""); return g.length >= 2 && (g.includes(d) || d.startsWith(g)); })) continue;
       reads.push({ text: t, vals: amountsInLine(t) });
     }
     const used = reads.filter((r) => r.vals.length);
@@ -795,7 +797,9 @@
     const values = [...new Set(used.flatMap((r) => r.vals))];
     // "sure" = at least two separate readings agree on the same amount
     const agreed = values.filter((v) => used.filter((r) => r.vals.includes(v)).length >= 2);
-    return { text: used.map((r) => r.text).join(" / "), values, agreed };
+    // every reading says the same amount (if they disagree, we are NOT sure)
+    const unanimous = values.filter((v) => used.every((r) => r.vals.includes(v)));
+    return { text: used.map((r) => r.text).join(" / "), values, agreed, unanimous };
   }
 
   // OCR mixes up some look-alike digits. Two amounts "match" if they have the same
@@ -910,10 +914,14 @@
     const want = Math.round(Number(ctx.total) * 100);
     const main = mainAmount(ctx.lines, ctx.mainDigits, ctx.bigReads);
     r.mainAmount = main ? main.text : null;
-    if (main && main.values.some((v) => nearlySame(v, want))) r.amount = true;
+    // exact match from any reading → found. A one look-alike-digit match (3↔8, 0↔9…)
+    // only counts when the readings DON'T clearly agree on a different amount.
+    if (main && main.values.includes(want)) r.amount = true;
+    else if (main && !main.unanimous.length && main.values.some((v) => nearlySame(v, want))) r.amount = true;
+    if (r.amount && main && main.unanimous.length && !main.unanimous.includes(want) && !amountInText(text, ctx.total)) r.amount = false;
     // only call the amount WRONG when both readings agree on a different amount
-    const sureWrong = !r.amount && main && main.agreed.length && !main.agreed.some((v) => nearlySame(v, want));
-    if (sureWrong) r.wrongAmounts = [main.agreed[0] / 100];
+    const sureWrong = !r.amount && main && main.agreed.length && main.unanimous.length && !main.values.includes(want);
+    if (sureWrong) r.wrongAmounts = [main.unanimous[0] / 100];
 
     const amt = rupeesExact(ctx.total);
     const readable = !r.tooSmall;
@@ -937,10 +945,32 @@
     if (readable && r.glyphIssues.length) warn.push("glyph");
     if (readable && ((!r.app && r.layoutOk === false) || (r.app && r.appMarks === 0))) warn.push("layout");
     const soft = [];
-    if (!r.utr && !r.utrSeen) soft.push("utr");
+    // The UTR is optional (the first "Paid ✓" screen doesn't show one). Only a UTR
+    // the student typed must be in the screenshot — unless the screenshot has none.
+    if (/^\d{12}$/.test(ctx.utr || "") && !r.utr && !r.utrSeen && cands.length) soft.push("utr");
     if (!r.amount && !sureWrong) soft.push("amount");
     if (r.payee === false) soft.push("payee");
     return { ...r, hard, soft, warn };
+  }
+
+  // A fingerprint of ONE payment: amount + the date and time printed on the
+  // screenshot. Saved with the order, so the same payment can't be used twice
+  // (even re-saved / cropped). null if the screenshot doesn't show date AND time.
+  function payKey(text, total) {
+    text = text || "";
+    let y, mo, d;
+    let m = text.match(/\b(\d{1,2})\s+([A-Za-z]{3})[a-z]*,?\s+(20\d\d)\b/);
+    if (m) { d = +m[1]; mo = MONTHS.indexOf(m[2].toLowerCase()); y = +m[3]; }
+    else if ((m = text.match(/\b([A-Za-z]{3})[a-z]*\s+(\d{1,2}),?\s+(20\d\d)\b/))) { d = +m[2]; mo = MONTHS.indexOf(m[1].toLowerCase()); y = +m[3]; }
+    else if ((m = text.match(/\b(\d{1,2})[\/-](\d{1,2})[\/-](20\d\d)\b/))) { d = +m[1]; mo = +m[2] - 1; y = +m[3]; }
+    if (!y || mo < 0 || mo > 11 || !d) return null;
+    const t = text.match(/\b([01]?\d|2[0-3]):([0-5]\d)\s*([ap])?\.?\s*m?\b/i);
+    if (!t) return null;
+    let h = +t[1]; const ap = (t[3] || "").toLowerCase();
+    if (ap === "p" && h < 12) h += 12;
+    if (ap === "a" && h === 12) h = 0;
+    const p2 = (n) => String(n).padStart(2, "0");
+    return `${Math.round(Number(total) * 100)}|${y}-${p2(mo + 1)}-${p2(d)}|${p2(h)}:${t[2]}`;
   }
 
   // open = the owner's Open/Closed switch
@@ -968,6 +998,6 @@
     payeeSeen, timeCheck, otherAmounts, inspectImage, judgeScreenshot, utrCandidates, digitsDiff, mainAmount, amountsInLine, nearlySame,
     configured, sb, $, $$, esc, rupees, rupeesExact, rateFor, linePrice, todayIST, fmtTime, fmtDay, STATUS,
     toast, unlockAudio, audioReady, chime, askNotify, notify, flashTitle, stopFlash,
-    signInWithGoogle, signOut, setupNeededHTML, loadScript, ocrImage, warmOcr, utrInText, amountInText,
+    signInWithGoogle, signOut, setupNeededHTML, loadScript, ocrImage, warmOcr, utrInText, amountInText, payKey,
   };
 })();
