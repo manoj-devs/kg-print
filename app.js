@@ -711,11 +711,49 @@ function qrImageDataUrl() {
 }
 
 function saveQr() {
-  const a = document.createElement("a");
-  a.href = qrImageDataUrl();
-  a.download = `kg-print-pay-${orderTotal().toFixed(2)}.png`;
-  document.body.appendChild(a); a.click(); a.remove();
+  const url = qrImageDataUrl();
+  const name = `kg-print-pay-${orderTotal().toFixed(2)}.png`;
   startPaying();
+  // iPhone: a download goes to the Files app, but UPI apps pick QR codes from Photos.
+  // So show the QR image to press-and-hold → "Save to Photos" (or share → Save Image).
+  if (/iPhone|iPad|iPod/i.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)) {
+    return iosSaveQr(url, name);
+  }
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+}
+
+function iosSaveQr(url, name) {
+  const old = document.getElementById("iosQr");
+  if (old) old.remove();
+  const box = document.createElement("div");
+  box.id = "iosQr";
+  box.setAttribute("role", "dialog");
+  box.setAttribute("aria-label", "Save the payment QR to Photos");
+  box.style.cssText = "position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.75);display:flex;align-items:center;justify-content:center;padding:16px";
+  box.innerHTML = `<div style="background:#fff;border-radius:16px;padding:16px;max-width:360px;width:100%;text-align:center;font:15px/1.4 system-ui,sans-serif;color:#17171a">
+      <b style="font-size:17px">Save the QR to Photos</b>
+      <p style="margin:6px 0 10px">Press and hold the QR below → tap <b>Save to Photos</b>.</p>
+      <img src="${url}" alt="Payment QR" style="width:100%;max-width:300px;border:1px solid #ddd;border-radius:8px;-webkit-touch-callout:default">
+      <div style="display:flex;gap:8px;margin-top:12px">
+        <button type="button" class="btn block" id="iosQrShare">Share → Save Image</button>
+        <button type="button" class="btn primary block" id="iosQrDone">Done</button>
+      </div></div>`;
+  document.body.appendChild(box);
+  const close = () => box.remove();
+  box.querySelector("#iosQrDone").onclick = close;
+  box.addEventListener("click", (e) => { if (e.target === box) close(); });
+  const shareBtn = box.querySelector("#iosQrShare");
+  let file = null;
+  try {
+    const bin = atob(url.split(",")[1]), arr = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+    file = new File([arr], name, { type: "image/png" });
+  } catch (e) { /* ignore */ }
+  if (!file || !navigator.canShare || !navigator.canShare({ files: [file] })) shareBtn.hidden = true;
+  shareBtn.onclick = () => navigator.share({ files: [file] }).then(close).catch(() => {});
 }
 
 // Open just the UPI app (its normal home screen) — nothing else.
