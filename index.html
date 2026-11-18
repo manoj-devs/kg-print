@@ -11,7 +11,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=20261118b">
+  <link rel="stylesheet" href="styles.css?v=20261118c">
 </head>
 <body>
   <header class="topbar">
@@ -33,10 +33,10 @@
       <div class="hero">
         <div class="ticket-demo"><small>your token</small><b>KG-7</b></div>
         <h1>Skip the xerox queue.</h1>
-        <p class="lede">Upload your PDF, Word file or photos, pay by UPI, and get a token. Collect your prints when it says <b>Ready</b>.</p>
+        <p class="lede">Upload your PDF or photos, pay by UPI, and get a token. Collect your prints when it says <b>Ready</b>.</p>
       </div>
       <ol class="steps">
-        <li><span class="step-no">1</span><div><b>Upload</b><small>PDF, Word (.docx / .doc) or photos. Pick colour, sides and copies (colour is 1-side only).</small></div></li>
+        <li><span class="step-no">1</span><div><b>Upload</b><small>PDF or photos (Word files: convert to PDF first). Pick colour, sides and copies (colour is 1-side only).</small></div></li>
         <li><span class="step-no">2</span><div><b>Pay by UPI</b><small>Any UPI app (GPay, PhonePe, Paytm, Navi, BHIM…) — then upload the payment screenshot.</small></div></li>
         <li><span class="step-no">3</span><div><b>Get your token</b><small>Show your KG token at the shop when the status says Ready.</small></div></li>
       </ol>
@@ -66,14 +66,14 @@
           </div>
 
           <div class="card">
-            <div class="card-head"><span class="step-no">2</span><div><h2>Files to print</h2><small>PDF, Word (.docx/.doc), JPG, PNG · up to 25 MB each · max 20 files</small></div></div>
+            <div class="card-head"><span class="step-no">2</span><div><h2>Files to print</h2><small>PDF, JPG, PNG · up to 25 MB each · max 20 files · Word files: save as PDF first</small></div></div>
             <label class="dropzone" id="dropzone">
-              <input type="file" id="fileInput" multiple accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.webp,application/pdf,image/*,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document">
+              <input type="file" id="fileInput" multiple accept=".pdf,.jpg,.jpeg,.png,.webp,application/pdf,image/*">
               <b>📄 Tap to choose files</b>
               <small>or drag &amp; drop them here</small>
             </label>
             <div class="filelist" id="fileList"></div>
-            <p class="hint word-tip" id="wordHint" hidden>📄 <b>Word file?</b> We use the page count Word saved in the file (the same "Page 1 of N" you see in Word). <b>Save the file in Word/WPS right before uploading</b> so the count is up to date. Files made by apps or websites (never saved in Word) have no count — open them in Word or WPS and press Save first, or upload a PDF.</p>
+            <p class="hint word-tip" id="wordHint" hidden style="background:#fde8e8;border-color:#f2a9a9;color:#9b1c1c"></p>
           </div>
 
           <div class="card" id="payCard" hidden>
@@ -173,8 +173,8 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js" defer></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js" defer></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js" defer></script>
-  <script src="config.js?v=20261118b" defer></script>
-  <script src="common.js?v=20261118b" defer></script>
-  <script src="app.js?v=20261118b" defer></script>
+  <script src="config.js?v=20261118c" defer></script>
+  <script src="common.js?v=20261118c" defer></script>
+  <script src="app.js?v=20261118c" defer></script>
 </body>
 </html>

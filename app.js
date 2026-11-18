@@ -113,7 +113,7 @@ async function restoreDraft() {
   if (items.length || shotFile) return; // already working on something
   restoring = true;
   try {
-    items = (d.items || []).filter((x) => x.file).map((x) => ({ ...x, loading: false, rangeErr: "" }));
+    items = (d.items || []).filter((x) => x.file && x.kind !== "docx" && x.kind !== "doc").map((x) => ({ ...x, loading: false, rangeErr: "" }));
     items.forEach(applyRange);
     renderItems();
     $("#fNotes").value = d.notes || "";
@@ -324,10 +324,15 @@ function kindOf(name) {
 
 function addFiles(fileList) {
   KG.warmOcr(); // start loading the screenshot reader now
+  $("#wordHint").hidden = true;   // shown again below if this batch has a Word file
   for (const file of Array.from(fileList || [])) {
     if (items.length >= MAX_FILES) { toast(`Max ${MAX_FILES} files per order`, "warn"); break; }
     const kind = kindOf(file.name);
-    if (!kind) { toast(`${file.name}: only PDF, Word or photo files`, "error"); continue; }
+    if (/\.(docx?|odt|rtf|pptx?|xlsx?)$/i.test(file.name)) {
+      wordRefused(file.name);
+      continue;
+    }
+    if (!kind || kind === "docx" || kind === "doc") { toast(`${file.name}: only PDF files or photos can be printed`, "error", 6000); continue; }
     if (file.size > MAX_FILE) { toast(`${file.name} is bigger than 25 MB`, "error"); continue; }
     if (file.size === 0) { toast(`${file.name} is empty`, "error"); continue; }
     if (items.reduce((a, x) => a + x.file.size, 0) + file.size > MAX_ORDER) { toast(`${file.name}: one order can be at most 60 MB in total. Send the rest as a second order.`, "error", 7000); continue; }
@@ -376,6 +381,18 @@ async function shrinkPhoto(file) {
 async function keepInMemory(file) {
   const buf = await file.arrayBuffer();
   return new File([buf], file.name, { type: file.type, lastModified: file.lastModified });
+}
+
+// Word / other documents are not accepted: page counts and layout are only exact in PDF.
+function wordRefused(name) {
+  const box = $("#wordHint");
+  box.innerHTML = `✕ <b>${esc(name)}</b> is a Word/Office file. <b>Only PDF files are accepted</b> (so the pages and price are exact). Convert it to PDF and upload the PDF:<br>
+    • <b>Word (laptop):</b> File → Save As → choose <b>PDF</b><br>
+    • <b>Word / WPS (phone):</b> ⋮ / File → Export or Save as → <b>PDF</b><br>
+    • <b>Google Docs:</b> File → Download → <b>PDF</b>`;
+  box.hidden = false;
+  box.scrollIntoView({ behavior: "smooth", block: "center" });
+  toast(`${name}: please convert it to PDF and upload the PDF.`, "error", 8000);
 }
 
 async function countPages(it) {
@@ -518,7 +535,7 @@ function renderItems() {
       </div>`}
     </div>`;
   }).join("");
-  $("#wordHint").hidden = !items.some((i) => i.kind === "docx" || i.kind === "doc");
+  // (Word files are no longer accepted — #wordHint now only shows the "convert to PDF" message)
   updateTotals();
 }
 
