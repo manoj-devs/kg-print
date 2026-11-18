@@ -4,7 +4,7 @@ const { sb, $, $$, esc, rupees, rupeesExact, STATUS, toast, fmtTime, fmtDay, tod
 const KIND_LABEL = { pdf: "PDF", image: "IMG", docx: "DOCX", doc: "DOC" };
 const DAY = 864e5;
 const CLEANUP_AFTER_DAYS = 2;
-const READY_KEEP_HOURS = 3;   // print files are kept 3 h after "Printed — mark ready" (for a misprint), then deleted
+const READY_KEEP_DAYS = 7;   // printed but never collected: files kept 7 days, then removed (the order itself stays)
 const hoursAgo = (h) => new Date(Date.now() - h * 3600000).toISOString();
 
 let user = null;
@@ -880,11 +880,13 @@ async function deletePrints(list) {
 async function cleanup(manual) {
   const cutoff = new Date(Date.now() - CLEANUP_AFTER_DAYS * DAY).toISOString();
   const [a, b] = await Promise.all([
-    // print files: collected, printed (ready) 3+ hours ago, rejected 6+ hours ago, or older than 2 days
+    // print files: NEVER while an order is waiting or accepted-not-printed.
+    // Deleted only when Collected, 6 h after a rejection, or if printed (Ready)
+    // but not collected for 7 days. The order record itself is never deleted.
     sb.from("orders").select("id,files,status,created_at").eq("files_deleted", false)
-      .or(`status.eq.collected,created_at.lt."${cutoff}",and(status.eq.rejected,updated_at.lt."${hoursAgo(6)}"),and(status.eq.ready,updated_at.lt."${hoursAgo(READY_KEEP_HOURS)}")`).limit(200),
-    // screenshots: older than 2 days
-    sb.from("orders").select("id,screenshot_path").eq("shot_deleted", false).lt("created_at", cutoff).limit(200),
+      .or(`status.eq.collected,and(status.eq.rejected,updated_at.lt."${hoursAgo(6)}"),and(status.eq.ready,updated_at.lt."${hoursAgo(READY_KEEP_DAYS * 24)}")`).limit(200),
+    // payment screenshots: kept while the order is active; removed 2 days after it is Collected / Rejected
+    sb.from("orders").select("id,screenshot_path").eq("shot_deleted", false).in("status", ["collected", "rejected"]).lt("updated_at", cutoff).limit(200),
   ]);
   if (a.error || b.error) { if (manual) toast((a.error || b.error).message, "error"); return; }
 
