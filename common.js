@@ -648,7 +648,7 @@
   function readAmounts(text) {
     const out = [];
     // "62.37", and also "4.5" (PhonePe drops the last zero: ₹4.5 = ₹4.50)
-    for (const m of text.matchAll(/(?<![\d.\/:-])(\d{1,3}(?:,\d{3})+|\d{1,7})\.(\d{1,2})(?![\d.\/-])/g)) {
+    for (const m of text.matchAll(/(?<![\d.\/:-])(\d{1,3}(?:,\d{3})+|\d{1,7})\.(\d{1,2})(?:\d(?![\d.\/-]))?(?![\d.\/-])/g)) {
       const intPart = m[1].replace(/,/g, "");
       const paise = m[2].length === 1 ? m[2] + "0" : m[2];
       const vals = [Math.round(Number(intPart + "." + paise) * 100)];
@@ -739,7 +739,7 @@
         if (v2 > 0) out.add(v2);
       }
     };
-    let m = s.match(/(\d[\d,]*)[.,·:](\d{2})(?!\d)/);
+    let m = s.match(/(\d[\d,]*)[.,·:](\d{2})\d?(?!\d)/);   // "30.640": an icon (✓) read as a 3rd decimal
     if (m) { add(m[1].replace(/,/g, ""), m[2]); return [...out]; }
     m = s.match(/(\d[\d,]*)\.(\d)(?!\d)/);              // "4.5" = 4.50
     if (m) { add(m[1].replace(/,/g, ""), m[2] + "0"); return [...out]; }
@@ -769,9 +769,9 @@
 
   function amountsFromDigits(t) {
     const out = new Set();
-    const m = (t || "").replace(/\s+/g, "").match(/(\d+)[.,](\d{1,2})(?!\d)/);
+    const m = (t || "").replace(/\s+/g, "").match(/(\d+)[.,](\d{2})\d?(?!\d)|(\d+)[.,](\d)(?!\d)/);
     if (!m) return [];
-    const i = m[1], p = m[2].length === 1 ? m[2] + "0" : m[2];
+    const i = m[1] || m[3], p = m[2] || (m[4] + "0");
     out.add(Math.round(Number(i + "." + p) * 100));
     if (i.length >= 2 && RUPEE_MISREADS.includes(i[0])) out.add(Math.round(Number(i.slice(1) + "." + p) * 100));
     return [...out].filter((v) => v > 0);
@@ -920,6 +920,13 @@
     else if (main && !main.unanimous.length && main.values.some((v) => nearlySame(v, want))) r.amount = true;
     if (r.amount && main && main.unanimous.length && !main.unanimous.includes(want) && !amountInText(text, ctx.total)) r.amount = false;
     // only call the amount WRONG when both readings agree on a different amount
+    // The rupees match but the paise couldn't be read (small / next to an icon):
+    // accept — a real student is never refused over paise; the owner sees a note.
+    if (!r.amount && want >= 100) {
+      const rupees = Math.floor(want / 100);
+      const seen = [...(main ? main.values : []), ...readAmounts(text).flat()];
+      if (seen.some((v) => Math.floor(v / 100) === rupees)) { r.amount = true; r.paiseUnsure = true; }
+    }
     const sureWrong = !r.amount && main && main.agreed.length && main.unanimous.length && !main.values.includes(want);
     if (sureWrong) r.wrongAmounts = [main.unanimous[0] / 100];
 
@@ -944,6 +951,7 @@
     if (readable && r.patches.length) warn.push("patch");
     if (readable && r.glyphIssues.length) warn.push("glyph");
     if (readable && ((!r.app && r.layoutOk === false) || (r.app && r.appMarks === 0))) warn.push("layout");
+    if (r.paiseUnsure) warn.push("paise");
     const soft = [];
     // The UTR is optional (the first "Paid ✓" screen doesn't show one). Only a UTR
     // the student typed must be in the screenshot — unless the screenshot has none.

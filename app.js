@@ -80,6 +80,21 @@ async function draftOp(mode, fn) {
   });
 }
 let draftTimer = null, restoring = false;
+// iPhones (Safari/WebKit) can lose File objects kept in browser storage ("The object
+// can not be found here"), so drafts keep the file's BYTES. Read once per file.
+const bytesCache = new WeakMap();
+async function bytesOf(file) {
+  if (!file) return null;
+  if (bytesCache.has(file)) return bytesCache.get(file);
+  try { const b = await file.arrayBuffer(); bytesCache.set(file, b); return b; } catch (e) { return null; }
+}
+async function readable(file) {
+  try { await file.slice(0, 16).arrayBuffer(); return true; } catch (e) { return false; }
+}
+function fileFromDraft(x) {
+  if (x && x.data) return new File([x.data], x.name || "file", { type: x.type || "", lastModified: x.lastModified || Date.now() });
+  return x && x.file ? x.file : null;   // drafts saved by an older version
+}
 function saveDraft() {
   if (restoring || !user) return;
   clearTimeout(draftTimer);
@@ -88,12 +103,12 @@ function saveDraft() {
       if (!items.length && !shotFile && !$("#fUtr").value && !$("#fNotes").value) return clearDraft();
       const d = {
         user: user.id, savedAt: Date.now(),
-        items: items.filter((i) => !i.loading).map((i) => ({
-          id: i.id, file: i.file, name: i.name, kind: i.kind, pages: i.pages, total: i.total,
+        items: (await Promise.all(items.filter((i) => !i.loading).map(async (i) => ({
+          id: i.id, data: await bytesOf(i.file), type: i.file.type, name: i.name, kind: i.kind, pages: i.pages, total: i.total,
           range: i.range, rangeMode: i.rangeMode, pagesSource: i.pagesSource, minPages: i.minPages || 0,
           copies: i.copies, color: i.color, double: i.double && !i.color,
-        })),
-        shot: shotFile || null,
+        })))).filter((x) => x.data),
+        shot: shotFile ? { data: await bytesOf(shotFile), type: shotFile.type, name: shotFile.name, lastModified: shotFile.lastModified } : null,
         utr: $("#fUtr").value, utrAuto: $("#fUtr").dataset.auto || "0",
         notes: $("#fNotes").value,
         payingSince, qrSaved,
@@ -113,7 +128,16 @@ async function restoreDraft() {
   if (items.length || shotFile) return; // already working on something
   restoring = true;
   try {
-    items = (d.items || []).filter((x) => x.file && x.kind !== "docx" && x.kind !== "doc").map((x) => ({ ...x, loading: false, rangeErr: "" }));
+    const restored = [];
+    let lost = 0;
+    for (const x of d.items || []) {
+      if (x.kind === "docx" || x.kind === "doc") continue;
+      const f = fileFromDraft(x);
+      if (f && await readable(f)) { const { data, ...rest } = x; restored.push({ ...rest, file: f, loading: false, rangeErr: "" }); }
+      else lost++;
+    }
+    items = restored;
+    if (lost) toast(`${lost} file${lost > 1 ? "s" : ""} from your unfinished order couldn't be restored — please add ${lost > 1 ? "them" : "it"} again.`, "warn", 8000);
     items.forEach(applyRange);
     renderItems();
     $("#fNotes").value = d.notes || "";
@@ -122,15 +146,18 @@ async function restoreDraft() {
     payingSince = d.payingSince || 0;
     qrSaved = !!d.qrSaved;
     if (qrSaved) { $("#qrSavedNote").innerHTML = "✓ QR saved to your phone. Now open your UPI app (step 2)."; $("#qrSavedNote").classList.add("qr-saved"); }
-    if (d.shot) {
-      shotFile = d.shot;
+    const shot = d.shot ? (d.shot.data ? fileFromDraft(d.shot) : d.shot) : null;
+    if (shot && await readable(shot)) {
+      shotFile = shot;
       const img = $("#shotPreview");
-      img.src = URL.createObjectURL(d.shot);
+      img.src = URL.createObjectURL(shot);
       img.hidden = false;
       $("#utrHint").textContent = "Screenshot restored — checking it again…";
-      startShotOcr(d.shot);
+      startShotOcr(shot);
+    } else if (d.shot) {
+      toast("Your payment screenshot couldn't be restored — please upload it again.", "warn", 8000);
     }
-    if (items.length || d.shot) {
+    if (items.length || shotFile) {
       toast("Restored your unfinished order ✓", "ok", 4000);
       // they had gone to pay → take them to the last step
       if (payingSince && Date.now() - payingSince < 30 * 60000) { leftForPayment = true; setTimeout(welcomeBack, 400); }
@@ -964,6 +991,18 @@ async function submitOrder(e) {
 
   if (blocked) return fail("Your account is blocked because of fake payments. Please talk to the shop owner.");
 
+  // the phone may have dropped a file (iPhone after switching apps / restoring) — check first
+  for (const it of items) {
+    if (!(await readable(it.file))) {
+      items = items.filter((x) => x !== it); renderItems();
+      return fail(`Your phone lost access to "${it.name}". Please add it again (tap "Tap to choose files"), then submit. Your payment is not lost.`);
+    }
+  }
+  if (!(await readable(shot))) {
+    shotFile = null; $("#shotPreview").hidden = true; $("#fShot").value = "";
+    return fail("Your phone lost access to the payment screenshot. Please upload it again from your gallery, then submit.", "#fShot");
+  }
+
   const uploaded = [];
   try {
     // 1. the screenshot must actually show the UTR the student typed
@@ -991,13 +1030,13 @@ async function submitOrder(e) {
     } else {
       if (problems.length && !$("#fOverride").checked) {
         ocrFails++;
-        if (ocrFails >= 2) $("#overrideBox").hidden = false;
+        if (ocrFails >= 1) $("#overrideBox").hidden = false;
         const first = (r.hard || [])[0];
         const what = first ? first.msg
           : problems.includes("utr") ? (!(r.utrCandidates || []).length ? "This screenshot doesn't show the UTR (it's the first \"Paid\" screen). In your UPI app, tap this payment to open its DETAILS — GPay: \"UPI transaction ID\", PhonePe: \"UTR\", Paytm: \"UPI Ref No.\" — and upload a screenshot of that page." : "This exact UTR is not in your screenshot. Check every digit, or upload the screenshot that shows the UTR.")
           : problems.includes("amount") ? `Couldn't read ${rupeesExact(orderTotal())} in your screenshot. Pay EXACTLY ${rupeesExact(orderTotal())} and upload the original screenshot (not from WhatsApp).`
           : `The screenshot doesn't show payment to ${settings.payee_name}. Make sure you paid the shop.`;
-        return fail(ocrFails >= 2 ? what + " If your payment is correct, tick the box below to send it to the shop owner." : what, problems.includes("utr") ? "#fUtr" : "#fShot");
+        return fail(what + " If your payment is correct, tick the box below to send it to the shop owner.", problems.includes("utr") ? "#fUtr" : "#fShot");
       }
       studentCheck = { utr: r.utr, amount: r.amount, payee: r.payee, override: problems.length > 0, missing: problems, warn: r.warn || [], utrSeen: r.utrSeen || null, dev: devScreen() };
     }
@@ -1065,7 +1104,7 @@ async function submitOrder(e) {
 
 function friendlyError(err) {
   const msg = (err && (err.message || err.error_description)) || String(err);
-  if (/could not be read|NotReadable|permission problems/i.test(msg)) return "Your phone lost access to a file. Please remove the files, select them again, and submit.";
+  if (/could not be read|NotReadable|permission problems|object can not be found|NotFoundError|object could not be found/i.test(msg)) return "Your phone lost access to a file. Please remove the files, select them again, and submit.";
   if (/orders_utr_unique/.test(msg)) return "This UTR was already used for another order.";
   if (/orders_shot_unique/.test(msg)) return "This screenshot was already uploaded before.";
   if (/blocked/i.test(msg)) { blocked = true; $("#blockedBanner").hidden = false; return "Your account is blocked because of fake payments. Please talk to the shop owner."; }

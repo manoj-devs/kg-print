@@ -98,7 +98,7 @@ function run() {
     v.innerHTML = `✓ ACCEPTED — the order would go through.${(j.warn || []).length ? "<br><small>You'd see a ⚠ Check note on the order (see below).</small>" : ""}`;
   }
   // what? — note: a UTR already used for another order is checked on the real page only
-  const WARN = { status: "phone clock doesn't match", patch: "possible edit (patch)", glyph: "odd-looking digit in UTR", layout: "unusual receipt layout" };
+  const WARN = { status: "phone clock doesn't match", patch: "possible edit (patch)", glyph: "odd-looking digit in UTR", layout: "unusual receipt layout", paise: "rupees found, paise not readable" };
   const row = (k, val) => `<b>${k}</b><span>${val}</span>`;
   $("#facts").innerHTML = [
     row("App", esc(j.app || "not recognised (fine)")),

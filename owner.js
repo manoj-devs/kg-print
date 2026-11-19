@@ -654,7 +654,8 @@ function checkChips(o) {
     if (c.utr) chips.push(chip("good", "✓ Exact UTR seen in screenshot"));
     else if (c.utrSeen) chips.push(chip("bad", `✕ Screenshot shows UTR ${esc(c.utrSeen)} — not ${esc(o.utr)}`));
     else if (o.utr) chips.push(chip("meh", "UTR not seen in screenshot"));
-    if (c.amount) chips.push(chip("good", `✓ ${rupeesExact(o.total)} seen`));
+    if (c.amount && c.paiseUnsure) chips.push(chip("meh", `⚠ ₹${Math.floor(o.total)} seen — check the paise (${rupeesExact(o.total)}) in your UPI app`));
+    else if (c.amount) chips.push(chip("good", `✓ ${rupeesExact(o.total)} seen`));
     else if (c.wrongAmounts && c.wrongAmounts.length) chips.push(chip("bad", `✕ Shows ${rupeesExact(c.wrongAmounts[0])}, not ${rupeesExact(o.total)}`));
     else chips.push(chip("meh", `${rupeesExact(o.total)} not seen`));
     if (c.demo) chips.push(chip("bad", `✕ Says "${esc(c.demo.toUpperCase())}"`));
