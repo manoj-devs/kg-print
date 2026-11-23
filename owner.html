@@ -11,8 +11,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=20261123b">
-  <link rel="stylesheet" href="owner.css?v=20261123b">
+  <link rel="stylesheet" href="styles.css?v=20261124b">
+  <link rel="stylesheet" href="owner.css?v=20261124b">
 </head>
 <body>
   <header class="topbar">
@@ -213,16 +213,15 @@
       <h3 style="margin-bottom:6px">Blocked students</h3>
       <div id="blockedList" class="blocked-list"><small class="muted">Loading…</small></div>
       <hr style="border:0;border-top:1px solid var(--line);margin:16px 0">
-      <p class="hint">Orders are never deleted. Print files are kept while an order is waiting, accepted or ready, and are deleted automatically when it is <b>Collected</b>, 6 hours after a rejection, or if a printed order is not collected for 7 days. Payment screenshots are kept until 2 days after the order is collected or rejected.</p>
-      <button type="button" class="btn small" id="cleanupBtn">🧹 Clean up old files now</button>
+      <p class="hint">Orders are never deleted. When you tap <b>✓ Collected</b>, that order's files and payment screenshot are deleted automatically, right away. Files are also cleared 6 hours after a rejection, or if a printed order is left uncollected for 7 days. Nothing needs to be cleaned by hand.</p>
     </form>
   </div>
 
   <div id="toasts"></div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
-  <script src="config.js?v=20261123b"></script>
-  <script src="common.js?v=20261123b"></script>
-  <script src="owner.js?v=20261123b"></script>
+  <script src="config.js?v=20261124b"></script>
+  <script src="common.js?v=20261124b"></script>
+  <script src="owner.js?v=20261124b"></script>
 </body>
 </html>

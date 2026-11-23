@@ -87,7 +87,6 @@ function wireEvents() {
   $("#sumFrom").onchange = $("#sumTo").onchange = () => loadSummary();
   $("#settingsCancel").onclick = () => ($("#settingsModal").hidden = true);
   $("#settingsForm").onsubmit = saveSettings;
-  $("#cleanupBtn").onclick = () => cleanup(true);
 
   $("#newView").onclick = () => {
     $("#newModal").hidden = true;
@@ -781,7 +780,7 @@ async function onGridClick(e) {
   if (act === "ready") return setStatus(o, { status: "ready" }, `${o.token} is ready — student notified`);
   if (act === "collected") {
     const ok = await setStatus(o, { status: "collected" }, `${o.token} collected`);
-    if (ok) deletePrints([ok]);
+    if (ok) deleteOrderFiles(ok);   // order done → remove its files right away
     return;
   }
   if (act === "back") {
@@ -867,47 +866,69 @@ const CHECK_VERSION = 6;
 function isChecked(o) { return !!o.auto_check && (o.auto_check.error || o.auto_check.v === CHECK_VERSION); }
 
 // ---------------- storage cleanup (keeps free 1 GB from filling up) ----------------
-async function deletePrints(list) {
-  for (const o of list) {
-    const paths = o.files.map((f) => f.path);
+// Order finished → delete its print files AND its payment screenshot straight away.
+// The payment's fingerprint (UTR, hash, amount+time) stays in the database, so
+// reuse protection still works without keeping the image.
+async function deleteOrderFiles(o) {
+  const patch = {};
+  if (!o.files_deleted && (o.files || []).length) {
+    const paths = o.files.map((f) => f.path).filter(Boolean);
     const { error } = await sb.storage.from("prints").remove(paths);
-    if (!error) {
-      const { data } = await sb.from("orders").update({ files_deleted: true }).eq("id", o.id).select().single();
-      if (data) upsert(data);
-    }
+    if (!error) patch.files_deleted = true;
+  }
+  if (!o.shot_deleted && o.screenshot_path) {
+    const { error } = await sb.storage.from("payments").remove([o.screenshot_path]);
+    if (!error) patch.shot_deleted = true;
+  }
+  if (Object.keys(patch).length) {
+    const { data } = await sb.from("orders").update(patch).eq("id", o.id).select().single();
+    if (data) upsert(data);
   }
 }
 
 async function cleanup(manual) {
-  const cutoff = new Date(Date.now() - CLEANUP_AFTER_DAYS * DAY).toISOString();
-  const [a, b] = await Promise.all([
-    // print files: NEVER while an order is waiting or accepted-not-printed.
-    // Deleted only when Collected, 6 h after a rejection, or if printed (Ready)
-    // but not collected for 7 days. The order record itself is never deleted.
-    sb.from("orders").select("id,files,status,created_at").eq("files_deleted", false)
-      .or(`status.eq.collected,and(status.eq.rejected,updated_at.lt."${hoursAgo(6)}"),and(status.eq.ready,updated_at.lt."${hoursAgo(READY_KEEP_DAYS * 24)}")`).limit(200),
-    // payment screenshots: kept while the order is active; removed 2 days after it is Collected / Rejected
-    sb.from("orders").select("id,screenshot_path").eq("shot_deleted", false).in("status", ["collected", "rejected"]).lt("updated_at", cutoff).limit(200),
-  ]);
-  if (a.error || b.error) { if (manual) toast((a.error || b.error).message, "error"); return; }
-
-  let n = 0;
-  if (a.data.length) {
-    const paths = a.data.flatMap((o) => o.files.map((f) => f.path));
-    const { error } = await sb.storage.from("prints").remove(paths);
-    if (!error) {
+  if (manual) toast("Cleaning up old files…", "info", 3000);
+  let total = 0, err = null;
+  // loop in batches so a big backlog is cleared in one go, not 200 at a time
+  for (let pass = 0; pass < 40; pass++) {
+    const cutoff = new Date(Date.now() - CLEANUP_AFTER_DAYS * DAY).toISOString();
+    const nowIso = new Date().toISOString();
+    const [a, b] = await Promise.all([
+      // print files: NEVER while an order is waiting or accepted-not-printed.
+      // Deleted only when Collected, 6 h after a rejection, or if printed (Ready)
+      // but not collected for 7 days. The order record itself is never deleted.
+      sb.from("orders").select("id,files").eq("files_deleted", false)
+        .or(`status.eq.collected,and(status.eq.rejected,updated_at.lt."${hoursAgo(6)}"),and(status.eq.ready,updated_at.lt."${hoursAgo(READY_KEEP_DAYS * 24)}")`).limit(500),
+      // payment screenshots: kept while the order is active; removed 2 days after it is Collected / Rejected
+      // collected: screenshot removed now (payment done); rejected: after 2 days (dispute window)
+      sb.from("orders").select("id,screenshot_path,status").eq("shot_deleted", false)
+        .or(`status.eq.collected,and(status.eq.rejected,updated_at.lt."${cutoff}")`).limit(500),
+    ]);
+    if (a.error || b.error) { err = a.error || b.error; break; }
+    let did = 0;
+    if (a.data.length) {
+      const paths = a.data.flatMap((o) => (o.files || []).map((f) => f.path)).filter(Boolean);
+      if (paths.length) {
+        const { error } = await sb.storage.from("prints").remove(paths);
+        if (error) { err = error; break; }
+      }
       await sb.from("orders").update({ files_deleted: true }).in("id", a.data.map((o) => o.id));
-      n += paths.length;
+      total += paths.length; did += a.data.length;
     }
-  }
-  if (b.data.length) {
-    const paths = b.data.map((o) => o.screenshot_path);
-    const { error } = await sb.storage.from("payments").remove(paths);
-    if (!error) {
+    if (b.data.length) {
+      const paths = b.data.map((o) => o.screenshot_path).filter(Boolean);
+      if (paths.length) {
+        const { error } = await sb.storage.from("payments").remove(paths);
+        if (error) { err = error; break; }
+      }
       await sb.from("orders").update({ shot_deleted: true }).in("id", b.data.map((o) => o.id));
-      n += paths.length;
+      total += paths.length; did += b.data.length;
     }
+    if (!did) break;   // nothing left to clean
   }
-  if (manual) toast(n ? `Cleaned up ${n} old file(s)` : "Nothing to clean up", "ok");
-  if (n) loadOrders();
+  if (manual) {
+    if (err) toast("Cleanup error: " + err.message, "error", 7000);
+    else toast(total ? `Cleaned up ${total} old file(s) ✓` : "Nothing to clean up", "ok");
+  }
+  if (total) loadOrders();
 }
