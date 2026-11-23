@@ -1,0 +1,7 @@
+User-agent: *
+Allow: /
+Disallow: /owner.html
+Disallow: /shottest.html
+Disallow: /selftest.html
+
+Sitemap: https://manoj-devs.github.io/kg-print/sitemap.xml

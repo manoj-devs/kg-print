@@ -669,7 +669,7 @@ function checkChips(o) {
     // payment time / date
     if (c.dateOld) chips.push(chip("bad", `✕ Old date in screenshot: ${esc(c.dateSeen)}`));
     if (c.timeOk === true) chips.push(chip("good", "✓ Payment time matches order"));
-    else if (c.timeOk === false) chips.push(chip("bad", `✕ Time in screenshot (${esc((c.timeSeen || []).join(", "))}) ≠ order time`));
+    else if (c.timeOk === false) chips.push(chip("meh", `⚠ Clock in screenshot (${esc((c.timeSeen || []).join(", "))}) looks off — the amount is what matters, check it in Paytm`));
 
     // the file itself
     if (c.ai) chips.push(chip("bad", `✕ AI image label found (${esc(c.ai)})`, "Hidden content-credential / AI tool label inside the file."));

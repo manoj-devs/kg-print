@@ -942,7 +942,9 @@
     if (readable && sureWrong) add("amount", false, `The screenshot shows ${rupeesExact(r.wrongAmounts[0])}, but this order needs exactly ${amt}.`);
     if (readable && r.dateOld) add("date", false, `The screenshot is from ${r.dateSeen}. Upload the screenshot of today's payment.`);
     if (r.tooSmall) add("small", false, `The image is too small (${r.w}×${r.h}) — it was resized or forwarded. Upload the original screenshot from your phone's gallery.`);
-    if (readable && r.timeOk === false) add("time", false, `The time in the screenshot (${r.timeSeen.join(", ")}) doesn't match this order. Take a fresh screenshot right after paying.`);
+    // Time-of-day only WARNS the owner now: a single misread clock digit (9:48 → 2:48)
+    // used to send real payments to manual check. Reuse is already caught by the unique
+    // screenshot, UTR and payment fingerprint, and the owner confirms the amount anyway.
     // These pixel / layout / clock checks can misfire on REAL screenshots (dark mode,
     // new app designs, Navi/BHIM…), so they never block a student — they only warn
     // the owner, who confirms the money in his UPI app anyway.

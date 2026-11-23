@@ -1113,6 +1113,7 @@ function friendlyError(err) {
   if (/JWT|not authenticated|sign in/i.test(msg)) return "Your login expired. Please log out and sign in again.";
   if (/exceeded|too large|maximum allowed size/i.test(msg)) return "A file is too large. Max 25 MB per file.";
   if (/Failed to fetch|NetworkError/i.test(msg)) return "No internet connection. Please try again.";
+  if (/orders being handled|Too many orders/i.test(msg)) return msg.replace(/^.*?(You already have|Too many orders)/, "$1");
   return "Something went wrong: " + msg;
 }
 
